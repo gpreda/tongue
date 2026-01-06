@@ -236,7 +236,7 @@ class History:
         print('=' * 60)
 
     def evaluate_round(self, round, chat):
-        """Evaluate a round synchronously and process results."""
+        """Evaluate a round synchronously (no printing - results shown next iteration)."""
         print('Validating translation...')
         round.judgement, round.judge_ms = validate_response(round.sentence, round.translation, chat)
         round.evaluated = True
@@ -247,14 +247,30 @@ class History:
         self.updateCorrectWords(round)
         self.total_completed += 1
 
-        # Print results
-        round.printRoundSummary()
-
         # Check for level changes
+        level_changed = False
         if self.check_advancement():
             self.advance_level()
+            level_changed = True
         elif self.check_demotion():
             self.demote_level()
+            level_changed = True
+
+        # Store reference to last evaluated round for printing later
+        self.last_evaluated_round = round
+        self.last_level_changed = level_changed
+
+        save_state()
+
+    def print_last_evaluation(self):
+        """Print results of the last evaluation (called at start of next iteration)."""
+        if not hasattr(self, 'last_evaluated_round') or self.last_evaluated_round is None:
+            return
+
+        round = self.last_evaluated_round
+
+        # Print results
+        round.printRoundSummary()
 
         # Print summary
         print('=' * 40)
@@ -271,7 +287,8 @@ class History:
                     print(f'Note: {poor_count} poor scores (already at minimum level)')
         print('=' * 40)
 
-        save_state()
+        # Clear after printing
+        self.last_evaluated_round = None
 
     def needs_new_story(self):
         """Check if we need to generate a new story."""
@@ -594,10 +611,13 @@ def main():
         # Get next sentence
         round = history.get_next_sentence(chat)
 
-        # Display story with current sentence highlighted
+        # 1. Display story with current sentence highlighted
         history.print_story_with_highlight(round.sentence)
 
-        # Display progress and prompt
+        # 2. Display previous evaluation results (if any)
+        history.print_last_evaluation()
+
+        # 3. Display new task for translation
         print(f"\n{history.get_progress_display()}")
         print(f"\n>>> {round.sentence}")
 
