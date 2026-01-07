@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tongue - Spanish Translation Practice</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Tongue</h1>
+            <p class="subtitle">Spanish Translation Practice</p>
+        </header>
+
+        <!-- Status Bar -->
+        <div id="status-bar" class="status-bar">
+            <span id="level-display">Level 1/10</span>
+            <span id="progress-display">Progress: 0/4 good scores</span>
+            <span id="completed-display">Completed: 0</span>
+            <button id="status-btn" class="btn-small">Details</button>
+        </div>
+
+        <!-- Story Section -->
+        <div id="story-section" class="story-section hidden">
+            <h2>Story <span id="story-level">(Level 1)</span></h2>
+            <div id="story-content" class="story-content"></div>
+        </div>
+
+        <!-- Previous Evaluation -->
+        <div id="previous-eval" class="evaluation-section hidden">
+            <h3>Previous Result</h3>
+            <div class="eval-content">
+                <p><strong>Sentence:</strong> <span id="prev-sentence"></span></p>
+                <p><strong>Your translation:</strong> <span id="prev-translation"></span></p>
+                <p><strong>Correct:</strong> <span id="prev-correct"></span></p>
+                <p><strong>Score:</strong> <span id="prev-score"></span></p>
+                <p id="prev-reason-row"><strong>Feedback:</strong> <span id="prev-reason"></span></p>
+            </div>
+        </div>
+
+        <!-- Current Task -->
+        <div id="task-section" class="task-section">
+            <div id="loading" class="loading">
+                <p>Loading...</p>
+            </div>
+            <div id="current-task" class="hidden">
+                <h3>Translate this sentence:</h3>
+                <p id="current-sentence" class="current-sentence"></p>
+                <form id="translation-form">
+                    <input type="text" id="translation-input" placeholder="Enter your English translation..." autocomplete="off">
+                    <div class="button-row">
+                        <button type="submit" id="submit-btn" class="btn-primary">Submit</button>
+                        <button type="button" id="hint-btn" class="btn-secondary">Hint</button>
+                    </div>
+                </form>
+                <div id="hint-display" class="hint-display hidden"></div>
+            </div>
+        </div>
+
+        <!-- Validation Result (shown after submit) -->
+        <div id="validation-result" class="validation-result hidden">
+            <h3>Result</h3>
+            <div class="result-content">
+                <p class="score-display">Score: <span id="result-score" class="score-value"></span></p>
+                <p><strong>Correct translation:</strong> <span id="result-correct"></span></p>
+                <p id="result-reason-row"><strong>Feedback:</strong> <span id="result-reason"></span></p>
+                <div id="level-change" class="level-change hidden"></div>
+                <button id="next-btn" class="btn-primary">Next Sentence</button>
+            </div>
+        </div>
+
+        <!-- Status Modal -->
+        <div id="status-modal" class="modal hidden">
+            <div class="modal-content">
+                <span class="close-btn">&times;</span>
+                <h2>Status Summary</h2>
+                <div id="status-details"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

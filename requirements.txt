@@ -1,0 +1,13 @@
+# Server dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+google-generativeai>=0.3.0
+psycopg2-binary>=2.9.0
+
+# Client dependencies
+requests>=2.31.0
+
+# Testing
+pytest>=7.4.0
+httpx>=0.25.0  # For FastAPI testing
