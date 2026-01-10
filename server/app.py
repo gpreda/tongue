@@ -136,11 +136,20 @@ async def startup():
         storage = PostgresStorage()
         print("Using PostgreSQL storage")
 
-    config = storage.load_config()
-
-    api_key = config.get('gemini_api_key')
+    # Get API key from environment variable first, then fall back to config file
+    api_key = os.environ.get('GEMINI_API_KEY')
     if not api_key:
-        raise RuntimeError("gemini_api_key not found in config file")
+        try:
+            config = storage.load_config()
+            api_key = config.get('gemini_api_key')
+        except FileNotFoundError:
+            pass
+
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY environment variable not set and config file not found. "
+            "Set GEMINI_API_KEY or create ~/.config/tongue/config.json"
+        )
 
     ai_provider = GeminiProvider(api_key)
 

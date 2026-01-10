@@ -18,13 +18,34 @@ class PostgresStorage(Storage):
             'postgresql://predator@localhost:5432/tongue'
         )
         self._conn = None
+        self._initialized = False
 
     @property
     def conn(self):
         """Lazy connection initialization."""
         if self._conn is None or self._conn.closed:
             self._conn = psycopg2.connect(self.db_url)
+            if not self._initialized:
+                self._init_db()
+                self._initialized = True
         return self._conn
+
+    def _init_db(self):
+        """Create tables if they don't exist."""
+        with self._conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_state (
+                    user_id VARCHAR(255) PRIMARY KEY,
+                    state JSONB NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_state_updated
+                ON user_state(updated_at)
+            """)
+        self._conn.commit()
 
     def close(self):
         """Close the database connection."""
