@@ -38,6 +38,7 @@ const elements = {
 
     validationResult: document.getElementById('validation-result'),
     resultScore: document.getElementById('result-score'),
+    resultStudent: document.getElementById('result-student'),
     resultCorrect: document.getElementById('result-correct'),
     resultReason: document.getElementById('result-reason'),
     resultReasonRow: document.getElementById('result-reason-row'),
@@ -161,7 +162,7 @@ function showCurrentTask(sentence) {
     elements.submitBtn.disabled = false;
 }
 
-function showValidationResult(result) {
+function showValidationResult(result, studentTranslation) {
     elements.currentTask.classList.add('hidden');
     elements.validationResult.classList.remove('hidden');
 
@@ -176,6 +177,7 @@ function showValidationResult(result) {
         elements.resultScore.classList.add('poor');
     }
 
+    elements.resultStudent.textContent = studentTranslation;
     elements.resultCorrect.textContent = result.correct_translation;
 
     if (result.evaluation && result.score < 100) {
@@ -291,7 +293,7 @@ async function handleSubmit(e) {
         updateStatusBar(status);
 
         // Show result
-        showValidationResult(result);
+        showValidationResult(result, translation);
 
     } catch (error) {
         console.error('Error submitting:', error);
