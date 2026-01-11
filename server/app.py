@@ -30,6 +30,8 @@ class TranslationRequest(BaseModel):
     sentence: str
     translation: str
     user_id: str = "default"
+    hint_used: bool = False
+    hint_words: list[str] = []
 
 
 class HintRequest(BaseModel):
@@ -160,6 +162,37 @@ async def root():
     return {"status": "ok", "service": "tongue-api", "language": LANGUAGE}
 
 
+# User Management Endpoints
+@app.get("/api/users")
+async def list_users():
+    """List all existing users."""
+    users = storage.list_users()
+    # Filter out 'default' as it's a system user
+    users = [u for u in users if u != 'default']
+    return {"users": users}
+
+
+@app.get("/api/users/{user_id}/exists")
+async def check_user_exists(user_id: str):
+    """Check if a user exists."""
+    exists = storage.user_exists(user_id)
+    return {"exists": exists}
+
+
+@app.post("/api/users/{user_id}")
+async def create_user(user_id: str):
+    """Create a new user. Returns error if user already exists."""
+    if storage.user_exists(user_id):
+        return {"success": False, "error": "User already exists"}
+
+    # Create empty history for new user
+    history = History()
+    user_histories[user_id] = history
+    save_history(user_id)
+
+    return {"success": True, "user_id": user_id}
+
+
 @app.get("/api/status", response_model=StatusResponse)
 async def get_status(user_id: str = "default"):
     """Get user status and progress."""
@@ -278,8 +311,12 @@ async def submit_translation(request: TranslationRequest):
         request.translation
     )
 
+    # Halve the score if hint was used
+    if request.hint_used:
+        judgement['score'] = int(judgement.get('score', 0) / 2)
+
     current_round.translation = request.translation
-    level_info = history.process_evaluation(judgement, judge_ms, current_round)
+    level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words)
     save_history(request.user_id)
 
     return TranslationResponse(
@@ -310,34 +347,27 @@ async def get_hint(request: HintRequest):
     )
 
 
-@app.get("/api/missed-words")
-async def get_missed_words(user_id: str = "default", limit: int = 20):
-    """Get words that need more practice."""
+@app.get("/api/learning-words")
+async def get_learning_words(user_id: str = "default"):
+    """Get words that are still being learned (not yet mastered)."""
     history = get_history(user_id)
-
-    sorted_missed = sorted(
-        history.missed_words.items(),
-        key=lambda x: x[1]['count'],
-        reverse=True
-    )[:limit]
+    words = history.get_learning_words()
 
     return {
-        "total": len(history.missed_words),
-        "words": [
-            {"word": word, "english": info["english"], "count": info["count"]}
-            for word, info in sorted_missed
-        ]
+        "total": len(words),
+        "words": words
     }
 
 
 @app.get("/api/mastered-words")
-async def get_mastered_words(user_id: str = "default", limit: int = 50):
-    """Get mastered words."""
+async def get_mastered_words(user_id: str = "default"):
+    """Get mastered words (>=80% success rate and at least 2 correct)."""
     history = get_history(user_id)
+    words = history.get_mastered_words()
 
     return {
-        "total": len(history.correct_words),
-        "words": history.correct_words[-limit:]
+        "total": len(words),
+        "words": words
     }
 
 

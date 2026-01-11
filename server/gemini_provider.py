@@ -1,5 +1,6 @@
 """Gemini AI provider implementation."""
 
+import ast
 import time
 import google.generativeai as genai
 
@@ -99,7 +100,18 @@ class GeminiProvider(AIProvider):
         """
         response, ms = self._execute_chat(prompt)
         judgement = self._sanitize_judgement(response)
-        judgement = eval(judgement)
+        try:
+            judgement = ast.literal_eval(judgement)
+        except (SyntaxError, ValueError) as e:
+            print(f"Failed to parse judgement: {e}")
+            print(f"Raw response: {response[:500]}")
+            # Return a fallback response
+            judgement = {
+                'score': 50,
+                'correct_translation': 'Unable to parse response',
+                'evaluation': f'Error parsing AI response. Please try again.',
+                'vocabulary_breakdown': []
+            }
         return (judgement, ms)
 
     def get_hint(self, sentence: str, correct_words: list) -> dict | None:

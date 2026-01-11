@@ -90,3 +90,43 @@ class PostgresStorage(Storage):
             print(f"Error saving state: {e}")
             self.conn.rollback()
             raise
+
+    def list_users(self) -> list[str]:
+        """List all existing user IDs."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM user_state ORDER BY user_id")
+                rows = cur.fetchall()
+                return [row[0] for row in rows]
+        except Exception as e:
+            print(f"Error listing users: {e}")
+            return []
+
+    def user_exists(self, user_id: str) -> bool:
+        """Check if a user exists."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM user_state WHERE user_id = %s",
+                    (user_id,)
+                )
+                return cur.fetchone() is not None
+        except Exception as e:
+            print(f"Error checking user: {e}")
+            return False
+
+    def delete_user(self, user_id: str) -> bool:
+        """Delete a user's state."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM user_state WHERE user_id = %s",
+                    (user_id,)
+                )
+                deleted = cur.rowcount > 0
+            self.conn.commit()
+            return deleted
+        except Exception as e:
+            print(f"Error deleting user: {e}")
+            self.conn.rollback()
+            return False

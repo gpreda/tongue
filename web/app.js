@@ -3,12 +3,48 @@
 const API_BASE = '';  // Same origin
 
 // State
+let currentUser = null;
 let currentSentence = null;
 let currentStory = null;
 let storySentences = [];
+let hintUsed = false;
+let hintWords = [];  // Words that were given as hints
+
+// Cookie helpers
+function setCookie(name, value, days = 365) {
+    const expires = new Date(Date.now() + days * 864e5).toUTCString();
+    document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/`;
+}
+
+function getCookie(name) {
+    const cookies = document.cookie.split('; ');
+    for (const cookie of cookies) {
+        const [cookieName, cookieValue] = cookie.split('=');
+        if (cookieName === name) {
+            return decodeURIComponent(cookieValue);
+        }
+    }
+    return null;
+}
+
+function deleteCookie(name) {
+    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+}
 
 // DOM Elements
 const elements = {
+    // Start screen
+    startScreen: document.getElementById('start-screen'),
+    startForm: document.getElementById('start-form'),
+    usernameInput: document.getElementById('username-input'),
+    usernameError: document.getElementById('username-error'),
+    startBtn: document.getElementById('start-btn'),
+
+    // Game screen
+    gameScreen: document.getElementById('game-screen'),
+    userDisplay: document.getElementById('user-display'),
+    newGameBtn: document.getElementById('new-game-btn'),
+
     statusBar: document.getElementById('status-bar'),
     levelDisplay: document.getElementById('level-display'),
     progressDisplay: document.getElementById('progress-display'),
@@ -43,11 +79,20 @@ const elements = {
     resultReason: document.getElementById('result-reason'),
     resultReasonRow: document.getElementById('result-reason-row'),
     levelChange: document.getElementById('level-change'),
-    nextBtn: document.getElementById('next-btn'),
+    autoAdvance: document.getElementById('auto-advance'),
 
     statusModal: document.getElementById('status-modal'),
     statusDetails: document.getElementById('status-details'),
-    closeBtn: document.querySelector('.close-btn')
+
+    masteredBtn: document.getElementById('mastered-btn'),
+    masteredModal: document.getElementById('mastered-modal'),
+    masteredCount: document.getElementById('mastered-count'),
+    masteredTbody: document.getElementById('mastered-tbody'),
+
+    learningBtn: document.getElementById('learning-btn'),
+    learningModal: document.getElementById('learning-modal'),
+    learningCount: document.getElementById('learning-count'),
+    learningTbody: document.getElementById('learning-tbody')
 };
 
 // API Functions
@@ -62,40 +107,56 @@ async function api(endpoint, options = {}) {
     return response.json();
 }
 
+// User management APIs
+async function checkUserExists(userId) {
+    return api(`/api/users/${encodeURIComponent(userId)}/exists`);
+}
+
+async function createUser(userId) {
+    return api(`/api/users/${encodeURIComponent(userId)}`, { method: 'POST' });
+}
+
+// Game APIs (all include user_id)
 async function getStatus() {
-    return api('/api/status');
+    return api(`/api/status?user_id=${encodeURIComponent(currentUser)}`);
 }
 
 async function getNextSentence() {
-    return api('/api/next');
+    return api(`/api/next?user_id=${encodeURIComponent(currentUser)}`);
 }
 
 async function submitTranslation(sentence, translation) {
     return api('/api/translate', {
         method: 'POST',
-        body: JSON.stringify({ sentence, translation })
+        body: JSON.stringify({
+            sentence,
+            translation,
+            user_id: currentUser,
+            hint_used: hintUsed,
+            hint_words: hintWords
+        })
     });
 }
 
 async function getHint(sentence) {
     return api('/api/hint', {
         method: 'POST',
-        body: JSON.stringify({ sentence })
+        body: JSON.stringify({ sentence, user_id: currentUser })
     });
 }
 
-async function getMissedWords() {
-    return api('/api/missed-words?limit=15');
+async function getMasteredWords() {
+    return api(`/api/mastered-words?user_id=${encodeURIComponent(currentUser)}`);
 }
 
-async function getMasteredWords() {
-    return api('/api/mastered-words?limit=20');
+async function getLearningWords() {
+    return api(`/api/learning-words?user_id=${encodeURIComponent(currentUser)}`);
 }
 
 // UI Functions
 function updateStatusBar(status) {
     elements.levelDisplay.textContent = `Level ${status.difficulty}/${status.max_difficulty}`;
-    elements.progressDisplay.textContent = `Progress: ${status.good_score_count}/${4} good scores`;
+    elements.progressDisplay.textContent = `Progress: ${status.good_score_count}/7 good scores`;
     elements.completedDisplay.textContent = `Completed: ${status.total_completed}`;
 }
 
@@ -160,6 +221,8 @@ function showCurrentTask(sentence) {
     elements.translationInput.focus();
     elements.hintDisplay.classList.add('hidden');
     elements.submitBtn.disabled = false;
+    hintUsed = false;  // Reset hint usage for new sentence
+    hintWords = [];    // Reset hint words for new sentence
 }
 
 function showValidationResult(result, studentTranslation) {
@@ -200,15 +263,16 @@ function showValidationResult(result, studentTranslation) {
     } else {
         elements.levelChange.classList.add('hidden');
     }
+
+    // Auto-advance after delay
+    setTimeout(() => {
+        loadNextSentence();
+    }, 3000);
 }
 
 async function showStatusModal() {
     try {
-        const [status, missed, mastered] = await Promise.all([
-            getStatus(),
-            getMissedWords(),
-            getMasteredWords()
-        ]);
+        const status = await getStatus();
 
         const avgScore = status.level_scores.length > 0
             ? (status.level_scores.reduce((a, b) => a + b, 0) / status.level_scores.length).toFixed(1)
@@ -220,12 +284,8 @@ async function showStatusModal() {
             <p><strong>Total Completed:</strong> ${status.total_completed}</p>
             <p><strong>Story Progress:</strong> ${status.story_sentences_remaining} sentences remaining</p>
             <p><strong>Recent Average:</strong> ${avgScore}</p>
-            <p><strong>Good Scores (≥80):</strong> ${status.good_score_count}/4 needed to advance</p>
+            <p><strong>Good Scores (≥80):</strong> ${status.good_score_count}/7 needed to advance</p>
             <p><strong>Poor Scores (<50):</strong> ${status.poor_score_count}/4 triggers demotion</p>
-            <p><strong>Mastered Words:</strong> ${mastered.total}</p>
-            ${mastered.words.length > 0 ? `<div class="words-list">${mastered.words.join(', ')}</div>` : ''}
-            <p><strong>Words to Practice:</strong> ${missed.total}</p>
-            ${missed.words.length > 0 ? `<div class="words-list">${missed.words.map(w => `${w.word} (${w.english})`).join(', ')}</div>` : ''}
         `;
 
         elements.statusModal.classList.remove('hidden');
@@ -235,8 +295,54 @@ async function showStatusModal() {
     }
 }
 
+function hideModal(modalId) {
+    document.getElementById(modalId).classList.add('hidden');
+}
+
 function hideStatusModal() {
     elements.statusModal.classList.add('hidden');
+}
+
+function renderWordsTable(tbody, words) {
+    if (words.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-message">No words yet</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = words.map(w => `
+        <tr>
+            <td class="word-cell">${w.word}</td>
+            <td>${w.type}</td>
+            <td>${w.translation}</td>
+            <td class="count-correct">${w.correct_count}</td>
+            <td class="count-incorrect">${w.incorrect_count}</td>
+            <td class="success-rate ${w.success_rate >= 80 ? 'rate-good' : w.success_rate >= 50 ? 'rate-medium' : 'rate-poor'}">${w.success_rate}%</td>
+        </tr>
+    `).join('');
+}
+
+async function showMasteredModal() {
+    try {
+        const data = await getMasteredWords();
+        elements.masteredCount.textContent = `(${data.total})`;
+        renderWordsTable(elements.masteredTbody, data.words);
+        elements.masteredModal.classList.remove('hidden');
+    } catch (error) {
+        console.error('Error fetching mastered words:', error);
+        alert('Failed to load mastered words');
+    }
+}
+
+async function showLearningModal() {
+    try {
+        const data = await getLearningWords();
+        elements.learningCount.textContent = `(${data.total})`;
+        renderWordsTable(elements.learningTbody, data.words);
+        elements.learningModal.classList.remove('hidden');
+    } catch (error) {
+        console.error('Error fetching learning words:', error);
+        alert('Failed to load learning words');
+    }
 }
 
 async function loadNextSentence() {
@@ -314,12 +420,15 @@ async function handleHint() {
         let hintHtml = '<strong>Hint:</strong><br>';
         if (hint.noun) {
             hintHtml += `Noun: <em>${hint.noun[0]}</em> = ${hint.noun[1]}<br>`;
+            hintWords.push(hint.noun[0]);  // Track hint word
         }
         if (hint.verb) {
             hintHtml += `Verb: <em>${hint.verb[0]}</em> = ${hint.verb[1]}<br>`;
+            hintWords.push(hint.verb[0]);  // Track hint word
         }
         if (hint.adjective) {
             hintHtml += `Adjective: <em>${hint.adjective[0]}</em> = ${hint.adjective[1]}`;
+            hintWords.push(hint.adjective[0]);  // Track hint word
         }
         if (!hint.noun && !hint.verb && !hint.adjective) {
             hintHtml = 'No hint available';
@@ -327,6 +436,7 @@ async function handleHint() {
 
         elements.hintDisplay.innerHTML = hintHtml;
         elements.hintDisplay.classList.remove('hidden');
+        hintUsed = true;  // Mark that hint was used
 
     } catch (error) {
         console.error('Error getting hint:', error);
@@ -337,24 +447,137 @@ async function handleHint() {
     }
 }
 
+// Start Screen Functions
+function showStartScreen() {
+    elements.startScreen.classList.remove('hidden');
+    elements.gameScreen.classList.add('hidden');
+    elements.usernameInput.value = '';
+    elements.usernameError.classList.add('hidden');
+    elements.usernameInput.focus();
+}
+
+function showGameScreen() {
+    elements.startScreen.classList.add('hidden');
+    elements.gameScreen.classList.remove('hidden');
+    elements.userDisplay.textContent = currentUser;
+    loadNextSentence();
+}
+
+async function handleStartForm(e) {
+    e.preventDefault();
+
+    const username = elements.usernameInput.value.trim();
+    if (!username) {
+        showUsernameError('Please enter a name');
+        return;
+    }
+
+    // Validate username (alphanumeric and spaces only)
+    if (!/^[a-zA-Z0-9 ]+$/.test(username)) {
+        showUsernameError('Name can only contain letters, numbers, and spaces');
+        return;
+    }
+
+    elements.startBtn.disabled = true;
+    elements.startBtn.textContent = 'Starting...';
+
+    try {
+        // Check if user exists
+        const { exists } = await checkUserExists(username);
+
+        if (exists) {
+            // Name already taken - reject
+            showUsernameError('This name is already taken. Please pick a different name.');
+        } else {
+            // New user - create them
+            const result = await createUser(username);
+            if (result.success) {
+                currentUser = username;
+                setCookie('tongue_user', username);
+                showGameScreen();
+            } else {
+                showUsernameError(result.error || 'Failed to create user');
+            }
+        }
+    } catch (error) {
+        console.error('Error starting game:', error);
+        showUsernameError('Failed to start. Please try again.');
+    } finally {
+        elements.startBtn.disabled = false;
+        elements.startBtn.textContent = 'Start Practice';
+    }
+}
+
+function showUsernameError(message) {
+    elements.usernameError.textContent = message;
+    elements.usernameError.classList.remove('hidden');
+}
+
+function handleNewGame() {
+    if (confirm('Start a new game? This will take you back to the name selection screen.')) {
+        deleteCookie('tongue_user');
+        currentUser = null;
+        showStartScreen();
+    }
+}
+
 // Event Listeners
+elements.startForm.addEventListener('submit', handleStartForm);
 elements.translationForm.addEventListener('submit', handleSubmit);
 elements.hintBtn.addEventListener('click', handleHint);
-elements.nextBtn.addEventListener('click', loadNextSentence);
 elements.statusBtn.addEventListener('click', showStatusModal);
-elements.closeBtn.addEventListener('click', hideStatusModal);
-elements.statusModal.addEventListener('click', (e) => {
-    if (e.target === elements.statusModal) {
-        hideStatusModal();
-    }
+elements.masteredBtn.addEventListener('click', showMasteredModal);
+elements.learningBtn.addEventListener('click', showLearningModal);
+elements.newGameBtn.addEventListener('click', handleNewGame);
+
+// Close buttons for all modals
+document.querySelectorAll('.close-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const modalId = btn.dataset.modal;
+        if (modalId) {
+            hideModal(modalId);
+        }
+    });
+});
+
+// Click outside modal to close
+[elements.statusModal, elements.masteredModal, elements.learningModal].forEach(modal => {
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.classList.add('hidden');
+        }
+    });
 });
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-        hideStatusModal();
+        elements.statusModal.classList.add('hidden');
+        elements.masteredModal.classList.add('hidden');
+        elements.learningModal.classList.add('hidden');
     }
 });
 
-// Initialize
-loadNextSentence();
+// Initialize - check for existing user cookie
+function init() {
+    const savedUser = getCookie('tongue_user');
+    if (savedUser) {
+        // Verify user still exists
+        checkUserExists(savedUser).then(({ exists }) => {
+            if (exists) {
+                currentUser = savedUser;
+                showGameScreen();
+            } else {
+                // User was deleted, show start screen
+                deleteCookie('tongue_user');
+                showStartScreen();
+            }
+        }).catch(() => {
+            showStartScreen();
+        });
+    } else {
+        showStartScreen();
+    }
+}
+
+init();

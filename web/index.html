@@ -13,13 +13,32 @@
             <p class="subtitle">Spanish Translation Practice</p>
         </header>
 
-        <!-- Status Bar -->
-        <div id="status-bar" class="status-bar">
-            <span id="level-display">Level 1/10</span>
-            <span id="progress-display">Progress: 0/4 good scores</span>
-            <span id="completed-display">Completed: 0</span>
-            <button id="status-btn" class="btn-small">Details</button>
+        <!-- Start Screen -->
+        <div id="start-screen" class="start-screen">
+            <div class="start-content">
+                <h2>Welcome!</h2>
+                <p>Enter your name to start or continue your practice:</p>
+                <form id="start-form">
+                    <input type="text" id="username-input" placeholder="Your name..." autocomplete="off" maxlength="30" required>
+                    <div id="username-error" class="error-message hidden"></div>
+                    <button type="submit" id="start-btn" class="btn-primary">Start Practice</button>
+                </form>
+            </div>
         </div>
+
+        <!-- Game Screen (hidden initially) -->
+        <div id="game-screen" class="hidden">
+            <!-- Status Bar -->
+            <div id="status-bar" class="status-bar">
+                <span id="user-display" class="user-display"></span>
+                <span id="level-display">Level 1/10</span>
+                <span id="progress-display">Progress: 0/7 good scores</span>
+                <span id="completed-display">Completed: 0</span>
+                <button id="status-btn" class="btn-small">Details</button>
+                <button id="mastered-btn" class="btn-small">Mastered</button>
+                <button id="learning-btn" class="btn-small">Learning</button>
+                <button id="new-game-btn" class="btn-small btn-danger">New Game</button>
+            </div>
 
         <!-- Story Section -->
         <div id="story-section" class="story-section hidden">
@@ -67,16 +86,65 @@
                 <p><strong>Correct translation:</strong> <span id="result-correct"></span></p>
                 <p id="result-reason-row"><strong>Feedback:</strong> <span id="result-reason"></span></p>
                 <div id="level-change" class="level-change hidden"></div>
-                <button id="next-btn" class="btn-primary">Next Sentence</button>
+                <p id="auto-advance" class="auto-advance">Loading next sentence...</p>
             </div>
         </div>
+        </div><!-- End game-screen -->
 
         <!-- Status Modal -->
         <div id="status-modal" class="modal hidden">
             <div class="modal-content">
-                <span class="close-btn">&times;</span>
-                <h2>Status Summary</h2>
+                <span class="close-btn" data-modal="status-modal">&times;</span>
+                <h2>Game Status</h2>
                 <div id="status-details"></div>
+            </div>
+        </div>
+
+        <!-- Mastered Words Modal -->
+        <div id="mastered-modal" class="modal hidden">
+            <div class="modal-content modal-large">
+                <span class="close-btn" data-modal="mastered-modal">&times;</span>
+                <h2>Mastered Words <span id="mastered-count" class="count-badge"></span></h2>
+                <p class="modal-subtitle">Words with 80%+ success rate and at least 2 correct translations</p>
+                <div class="table-container">
+                    <table id="mastered-table" class="words-table">
+                        <thead>
+                            <tr>
+                                <th>Word</th>
+                                <th>Type</th>
+                                <th>Translation</th>
+                                <th>Correct</th>
+                                <th>Incorrect</th>
+                                <th>Success Rate</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mastered-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Learning Words Modal -->
+        <div id="learning-modal" class="modal hidden">
+            <div class="modal-content modal-large">
+                <span class="close-btn" data-modal="learning-modal">&times;</span>
+                <h2>Words in Learning <span id="learning-count" class="count-badge"></span></h2>
+                <p class="modal-subtitle">Words with 50% or lower success rate</p>
+                <div class="table-container">
+                    <table id="learning-table" class="words-table">
+                        <thead>
+                            <tr>
+                                <th>Word</th>
+                                <th>Type</th>
+                                <th>Translation</th>
+                                <th>Correct</th>
+                                <th>Incorrect</th>
+                                <th>Success Rate</th>
+                            </tr>
+                        </thead>
+                        <tbody id="learning-tbody"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>

@@ -536,6 +536,63 @@ class TestMockAIProvider(unittest.TestCase):
         self.assertIsNotNone(hint)
 
 
+class TestGeminiProviderSanitize(unittest.TestCase):
+    """Tests for GeminiProvider response sanitization and error handling."""
+
+    def test_sanitize_judgement_valid_response(self):
+        from server.gemini_provider import GeminiProvider
+        # Create provider with mock - won't actually connect
+        provider = GeminiProvider.__new__(GeminiProvider)
+
+        raw = """Here is the result:
+        {'score': 85, 'correct_translation': 'Hello', 'evaluation': 'Good', 'vocabulary_breakdown': []}
+        """
+        result = provider._sanitize_judgement(raw)
+        self.assertIn("'score': 85", result)
+
+    def test_sanitize_judgement_with_booleans(self):
+        from server.gemini_provider import GeminiProvider
+        provider = GeminiProvider.__new__(GeminiProvider)
+
+        raw = "{'correct': true, 'wrong': false}"
+        result = provider._sanitize_judgement(raw)
+        self.assertIn("True", result)
+        self.assertIn("False", result)
+
+    def test_validate_translation_malformed_response(self):
+        """Test that malformed responses return fallback judgement."""
+        from server.gemini_provider import GeminiProvider
+        from unittest.mock import patch
+
+        provider = GeminiProvider.__new__(GeminiProvider)
+
+        # Mock _execute_chat to return malformed response
+        with patch.object(provider, '_execute_chat', return_value=("This is not valid JSON or dict", 100)):
+            with patch.object(provider, '_sanitize_judgement', return_value="invalid python"):
+                judgement, ms = provider.validate_translation("Hola", "Hello")
+
+        # Should return fallback response
+        self.assertEqual(judgement['score'], 50)
+        self.assertIn('Error', judgement['evaluation'])
+        self.assertEqual(judgement['vocabulary_breakdown'], [])
+
+    def test_validate_translation_valid_response(self):
+        """Test that valid responses are parsed correctly."""
+        from server.gemini_provider import GeminiProvider
+        from unittest.mock import patch
+
+        provider = GeminiProvider.__new__(GeminiProvider)
+
+        valid_dict = "{'score': 95, 'correct_translation': 'Hello world', 'evaluation': 'Excellent', 'vocabulary_breakdown': []}"
+
+        with patch.object(provider, '_execute_chat', return_value=(valid_dict, 100)):
+            with patch.object(provider, '_sanitize_judgement', return_value=valid_dict):
+                judgement, ms = provider.validate_translation("Hola mundo", "Hello world")
+
+        self.assertEqual(judgement['score'], 95)
+        self.assertEqual(judgement['correct_translation'], 'Hello world')
+
+
 class TestMockStorage(unittest.TestCase):
     """Tests for MockStorage to ensure it works correctly."""
 

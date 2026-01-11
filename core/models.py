@@ -52,8 +52,9 @@ class History:
 
     def __init__(self):
         self.rounds = []
-        self.correct_words = []
-        self.missed_words = {}
+        self.correct_words = []  # Legacy, kept for migration
+        self.missed_words = {}   # Legacy, kept for migration
+        self.words = {}  # New unified word tracking: {word: {type, translation, correct_count, incorrect_count}}
         self.difficulty = MIN_DIFFICULTY
         self.level_scores = []
         self.total_completed = 0
@@ -69,6 +70,7 @@ class History:
             'rounds': [r.to_dict() for r in self.rounds],
             'correct_words': self.correct_words,
             'missed_words': self.missed_words,
+            'words': self.words,
             'difficulty': self.difficulty,
             'level_scores': self.level_scores,
             'total_completed': self.total_completed,
@@ -82,7 +84,7 @@ class History:
     def from_dict(cls, data: dict) -> 'History':
         history = cls()
         history.rounds = [TongueRound.from_dict(r) for r in data.get('rounds', [])]
-        # Deduplicate correct_words
+        # Deduplicate correct_words (legacy)
         seen = set()
         correct_words = []
         for word in data.get('correct_words', []):
@@ -91,6 +93,12 @@ class History:
                 correct_words.append(word)
         history.correct_words = correct_words
         history.missed_words = data.get('missed_words', {})
+        history.words = data.get('words', {})
+
+        # Migrate legacy data to new words structure if needed
+        if not history.words and (history.correct_words or history.missed_words):
+            history._migrate_legacy_words()
+
         history.difficulty = data.get('difficulty', MIN_DIFFICULTY)
         history.level_scores = data.get('level_scores', [])
         history.total_completed = data.get('total_completed', 0)
@@ -99,6 +107,32 @@ class History:
         history.story_difficulty = data.get('story_difficulty')
         history.story_generate_ms = data.get('story_generate_ms', 0)
         return history
+
+    def _migrate_legacy_words(self) -> None:
+        """Migrate legacy correct_words and missed_words to unified words structure."""
+        # Migrate correct_words (we don't have type/translation info, so use defaults)
+        for word in self.correct_words:
+            if word not in self.words:
+                self.words[word] = {
+                    'type': 'unknown',
+                    'translation': '',
+                    'correct_count': 1,
+                    'incorrect_count': 0
+                }
+
+        # Migrate missed_words
+        for word, info in self.missed_words.items():
+            if word in self.words:
+                self.words[word]['incorrect_count'] += info.get('count', 1)
+                if info.get('english'):
+                    self.words[word]['translation'] = info['english']
+            else:
+                self.words[word] = {
+                    'type': 'unknown',
+                    'translation': info.get('english', ''),
+                    'correct_count': 0,
+                    'incorrect_count': info.get('count', 1)
+                }
 
     def record_score(self, difficulty: int, score: int) -> None:
         """Record a score for advancement tracking."""
@@ -177,10 +211,12 @@ class History:
         self.rounds.append(round)
         return round
 
-    def update_words(self, round: TongueRound) -> None:
-        """Update correct_words and missed_words based on round judgement."""
+    def update_words(self, round: TongueRound, hint_words: list[str] = None) -> None:
+        """Update word tracking based on round judgement."""
         if not round.judgement or 'vocabulary_breakdown' not in round.judgement:
             return
+
+        hint_words = hint_words or []
 
         for v_breakdown in round.judgement['vocabulary_breakdown']:
             word = v_breakdown[0]
@@ -188,6 +224,31 @@ class History:
             part_of_speech = v_breakdown[2].lower()
             was_correct = v_breakdown[3]
 
+            # Skip words that were given as hints (don't count for stats)
+            if word in hint_words:
+                continue
+
+            # Update unified words structure
+            if word not in self.words:
+                self.words[word] = {
+                    'type': part_of_speech,
+                    'translation': english,
+                    'correct_count': 0,
+                    'incorrect_count': 0
+                }
+            else:
+                # Update type/translation if we have better info
+                if self.words[word]['type'] == 'unknown':
+                    self.words[word]['type'] = part_of_speech
+                if not self.words[word]['translation']:
+                    self.words[word]['translation'] = english
+
+            if was_correct:
+                self.words[word]['correct_count'] += 1
+            else:
+                self.words[word]['incorrect_count'] += 1
+
+            # Also update legacy structures for backwards compatibility
             if was_correct and part_of_speech in ['noun', 'verb']:
                 if word not in self.correct_words:
                     self.correct_words.append(word)
@@ -199,7 +260,7 @@ class History:
                 else:
                     self.missed_words[word] = {'english': english, 'count': 1}
 
-    def process_evaluation(self, judgement: dict, judge_ms: int, round: TongueRound) -> dict:
+    def process_evaluation(self, judgement: dict, judge_ms: int, round: TongueRound, hint_words: list[str] = None) -> dict:
         """Process evaluation results and return status."""
         round.judgement = judgement
         round.judge_ms = judge_ms
@@ -207,7 +268,7 @@ class History:
 
         score = round.get_score()
         self.record_score(round.difficulty, score)
-        self.update_words(round)
+        self.update_words(round, hint_words or [])
         self.total_completed += 1
 
         level_changed = False
@@ -233,3 +294,43 @@ class History:
             'new_level': new_level,
             'change_type': change_type
         }
+
+    def get_mastered_words(self) -> list[dict]:
+        """Get words with success rate >= 80% and at least 2 correct.
+        Returns list sorted by total frequency (correct + incorrect) descending."""
+        mastered = []
+        for word, info in self.words.items():
+            total = info['correct_count'] + info['incorrect_count']
+            if total > 0 and info['correct_count'] >= 2:
+                success_rate = info['correct_count'] / total
+                if success_rate >= 0.8:
+                    mastered.append({
+                        'word': word,
+                        'type': info['type'],
+                        'translation': info['translation'],
+                        'correct_count': info['correct_count'],
+                        'incorrect_count': info['incorrect_count'],
+                        'total': total,
+                        'success_rate': round(success_rate * 100, 1)
+                    })
+        return sorted(mastered, key=lambda x: x['total'], reverse=True)
+
+    def get_learning_words(self) -> list[dict]:
+        """Get words with success rate <= 50%.
+        Returns list sorted by total frequency (correct + incorrect) descending."""
+        learning = []
+        for word, info in self.words.items():
+            total = info['correct_count'] + info['incorrect_count']
+            if total > 0:
+                success_rate = info['correct_count'] / total
+                if success_rate <= 0.5:
+                    learning.append({
+                        'word': word,
+                        'type': info['type'],
+                        'translation': info['translation'],
+                        'correct_count': info['correct_count'],
+                        'incorrect_count': info['incorrect_count'],
+                        'total': total,
+                        'success_rate': round(success_rate * 100, 1)
+                    })
+        return sorted(learning, key=lambda x: x['total'], reverse=True)

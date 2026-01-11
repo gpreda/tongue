@@ -5,9 +5,9 @@ MIN_DIFFICULTY = 1
 MAX_DIFFICULTY = 10
 
 # Advancement criteria
-ADVANCE_WINDOW_SIZE = 5       # Number of recent scores to consider
+ADVANCE_WINDOW_SIZE = 10      # Number of recent scores to consider
 ADVANCE_SCORE_THRESHOLD = 80  # Minimum score to count as "good"
-ADVANCE_REQUIRED_GOOD = 4     # Number of good scores needed to advance
+ADVANCE_REQUIRED_GOOD = 7     # Number of good scores needed to advance
 
 # Demotion criteria
 DEMOTE_SCORE_THRESHOLD = 50   # Scores below this count as "poor"

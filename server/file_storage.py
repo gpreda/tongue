@@ -44,3 +44,27 @@ class FileStorage(Storage):
         state_file = self._get_state_file(user_id)
         with open(state_file, 'w') as f:
             json.dump(state, f, indent=2)
+
+    def list_users(self) -> list[str]:
+        """List all existing user IDs."""
+        users = []
+        if os.path.exists(self.state_dir):
+            for filename in os.listdir(self.state_dir):
+                if filename == 'tongue_state.json':
+                    users.append('default')
+                elif filename.startswith('tongue_state_') and filename.endswith('.json'):
+                    user_id = filename[13:-5]  # Remove 'tongue_state_' and '.json'
+                    users.append(user_id)
+        return users
+
+    def user_exists(self, user_id: str) -> bool:
+        """Check if a user exists."""
+        return os.path.exists(self._get_state_file(user_id))
+
+    def delete_user(self, user_id: str) -> bool:
+        """Delete a user's state file."""
+        state_file = self._get_state_file(user_id)
+        if os.path.exists(state_file):
+            os.remove(state_file)
+            return True
+        return False
