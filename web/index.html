@@ -31,14 +31,23 @@
         <div id="game-screen" class="hidden">
             <!-- Status Bar -->
             <div id="status-bar" class="status-bar">
-                <span id="user-display" class="user-display"></span>
-                <span id="level-display">Level 1/10</span>
-                <span id="progress-display">Progress: 0/7 credits</span>
-                <span id="completed-display">Completed: 0</span>
-                <button id="status-btn" class="btn-small">Details</button>
-                <button id="mastered-btn" class="btn-small">Mastered</button>
-                <button id="learning-btn" class="btn-small">Learning</button>
-                <button id="new-game-btn" class="btn-small btn-danger">New Game</button>
+                <div class="status-stats">
+                    <span id="user-display" class="user-display"></span>
+                    <span id="level-display">L1</span>
+                    <span id="progress-display">0/7</span>
+                    <span id="completed-display">0</span>
+                </div>
+                <div class="status-actions">
+                    <div class="dropdown">
+                        <button id="menu-btn" class="btn-small">Menu</button>
+                        <div id="menu-dropdown" class="dropdown-content hidden">
+                            <button id="status-btn">Details</button>
+                            <button id="mastered-btn">Mastered</button>
+                            <button id="learning-btn">Learning</button>
+                        </div>
+                    </div>
+                    <button id="new-game-btn" class="btn-small btn-danger">New Game</button>
+                </div>
             </div>
 
         <!-- Current Task (Translation Input) -->

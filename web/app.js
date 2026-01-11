@@ -82,6 +82,9 @@ const elements = {
     levelChange: document.getElementById('level-change'),
     autoAdvance: document.getElementById('auto-advance'),
 
+    menuBtn: document.getElementById('menu-btn'),
+    menuDropdown: document.getElementById('menu-dropdown'),
+
     statusModal: document.getElementById('status-modal'),
     statusDetails: document.getElementById('status-details'),
 
@@ -166,9 +169,9 @@ async function getLearningWords() {
 
 // UI Functions
 function updateStatusBar(status) {
-    elements.levelDisplay.textContent = `Level ${status.difficulty}/${status.max_difficulty}`;
-    elements.progressDisplay.textContent = `Progress: ${status.good_score_count}/7 credits`;
-    elements.completedDisplay.textContent = `Completed: ${status.total_completed}`;
+    elements.levelDisplay.textContent = `L${status.difficulty}`;
+    elements.progressDisplay.textContent = `${status.good_score_count}/7`;
+    elements.completedDisplay.textContent = `${status.total_completed}`;
 }
 
 function splitIntoSentences(text) {
@@ -548,14 +551,31 @@ function handleNewGame() {
     }
 }
 
+// Menu dropdown toggle
+function toggleMenu() {
+    elements.menuDropdown.classList.toggle('hidden');
+}
+
+function closeMenu() {
+    elements.menuDropdown.classList.add('hidden');
+}
+
 // Event Listeners
 elements.startForm.addEventListener('submit', handleStartForm);
 elements.translationForm.addEventListener('submit', handleSubmit);
 elements.hintBtn.addEventListener('click', handleHint);
-elements.statusBtn.addEventListener('click', showStatusModal);
-elements.masteredBtn.addEventListener('click', showMasteredModal);
-elements.learningBtn.addEventListener('click', showLearningModal);
+elements.menuBtn.addEventListener('click', toggleMenu);
+elements.statusBtn.addEventListener('click', () => { closeMenu(); showStatusModal(); });
+elements.masteredBtn.addEventListener('click', () => { closeMenu(); showMasteredModal(); });
+elements.learningBtn.addEventListener('click', () => { closeMenu(); showLearningModal(); });
 elements.newGameBtn.addEventListener('click', handleNewGame);
+
+// Close menu when clicking outside
+document.addEventListener('click', (e) => {
+    if (!elements.menuBtn.contains(e.target) && !elements.menuDropdown.contains(e.target)) {
+        closeMenu();
+    }
+});
 
 // Close buttons for all modals
 document.querySelectorAll('.close-btn').forEach(btn => {
