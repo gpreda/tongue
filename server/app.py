@@ -94,6 +94,7 @@ class NextSentenceResponse(BaseModel):
     story: str
     sentences_remaining: int
     progress_display: str
+    is_review: bool
     has_previous_evaluation: bool
     previous_evaluation: Optional[dict]
 
@@ -287,10 +288,13 @@ async def get_next_sentence(user_id: str = "default"):
 
     # Check if there's an existing unevaluated round (e.g., after page refresh)
     current_round = None
+    is_review = False
     if history.rounds:
         last_round = history.rounds[-1]
         if not last_round.evaluated:
             current_round = last_round
+            # Check if this was a review sentence (generate_ms=0 indicates review)
+            is_review = last_round.generate_ms == 0
 
     # Only get a new sentence if there's no current unevaluated round
     if current_round is None:
@@ -304,7 +308,7 @@ async def get_next_sentence(user_id: str = "default"):
             save_history(user_id)
 
         # Get next sentence
-        current_round = history.get_next_sentence()
+        current_round, is_review = history.get_next_sentence()
         if not current_round:
             raise HTTPException(status_code=500, detail="No sentences available")
         save_history(user_id)
@@ -333,6 +337,7 @@ async def get_next_sentence(user_id: str = "default"):
         story=history.current_story or "",
         sentences_remaining=len(history.story_sentences),
         progress_display=history.get_progress_display(),
+        is_review=is_review,
         has_previous_evaluation=has_previous,
         previous_evaluation=previous_eval
     )

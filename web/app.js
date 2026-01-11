@@ -72,6 +72,7 @@ const elements = {
     submitBtn: document.getElementById('submit-btn'),
     hintBtn: document.getElementById('hint-btn'),
     hintDisplay: document.getElementById('hint-display'),
+    reviewNotice: document.getElementById('review-notice'),
 
     validationResult: document.getElementById('validation-result'),
     resultScore: document.getElementById('result-score'),
@@ -226,7 +227,7 @@ function showPreviousEvaluation(eval_data) {
     }
 }
 
-function showCurrentTask(sentence) {
+function showCurrentTask(sentence, isReview = false) {
     elements.loading.classList.add('hidden');
     elements.currentTask.classList.remove('hidden');
     elements.validationResult.classList.add('hidden');
@@ -237,6 +238,13 @@ function showCurrentTask(sentence) {
     elements.submitBtn.disabled = false;
     hintUsed = false;  // Reset hint usage for new sentence
     hintWords = [];    // Reset hint words for new sentence
+
+    // Show review notice if this is a review sentence
+    if (isReview) {
+        elements.reviewNotice.classList.remove('hidden');
+    } else {
+        elements.reviewNotice.classList.add('hidden');
+    }
 }
 
 function showValidationResult(result, studentTranslation) {
@@ -385,7 +393,7 @@ async function loadNextSentence() {
         }
 
         // Show current task
-        showCurrentTask(data.sentence);
+        showCurrentTask(data.sentence, data.is_review);
 
     } catch (error) {
         console.error('Error loading sentence:', error);

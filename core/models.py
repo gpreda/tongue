@@ -229,8 +229,9 @@ class History:
         self.story_difficulty = difficulty
         self.story_generate_ms = generate_ms
 
-    def get_next_sentence(self) -> TongueRound | None:
-        """Get next sentence from story or review queue. Returns None if no sentences available."""
+    def get_next_sentence(self) -> tuple[TongueRound | None, bool]:
+        """Get next sentence from story or review queue.
+        Returns (round, is_review) tuple. Round is None if no sentences available."""
         # Check for due review sentences first
         for i, review in enumerate(self.review_queue):
             if review['due_at_round'] <= self.total_completed:
@@ -238,15 +239,15 @@ class History:
                 self.review_queue.pop(i)
                 round = TongueRound(review['sentence'], review['difficulty'], 0)
                 self.rounds.append(round)
-                return round
+                return (round, True)
 
         # Otherwise get next sentence from story
         if not self.story_sentences:
-            return None
+            return (None, False)
         sentence = self.story_sentences.pop(0)
         round = TongueRound(sentence, self.story_difficulty, self.story_generate_ms)
         self.rounds.append(round)
-        return round
+        return (round, False)
 
     def update_words(self, round: TongueRound, hint_words: list[str] = None) -> None:
         """Update word tracking based on round judgement."""
