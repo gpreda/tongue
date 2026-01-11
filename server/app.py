@@ -285,21 +285,31 @@ async def get_next_sentence(user_id: str = "default"):
     """Get the next sentence for translation."""
     history = get_history(user_id)
 
-    # Generate story if needed
-    if history.needs_new_story():
-        story, ms = ai_provider.generate_story(
-            history.correct_words,
-            history.difficulty
-        )
-        history.set_story(story, history.difficulty, ms)
+    # Check if there's an existing unevaluated round (e.g., after page refresh)
+    current_round = None
+    if history.rounds:
+        last_round = history.rounds[-1]
+        if not last_round.evaluated:
+            current_round = last_round
+
+    # Only get a new sentence if there's no current unevaluated round
+    if current_round is None:
+        # Generate story if needed
+        if history.needs_new_story():
+            story, ms = ai_provider.generate_story(
+                history.correct_words,
+                history.difficulty
+            )
+            history.set_story(story, history.difficulty, ms)
+            save_history(user_id)
+
+        # Get next sentence
+        current_round = history.get_next_sentence()
+        if not current_round:
+            raise HTTPException(status_code=500, detail="No sentences available")
         save_history(user_id)
 
-    # Get next sentence
-    round = history.get_next_sentence()
-    if not round:
-        raise HTTPException(status_code=500, detail="No sentences available")
-
-    save_history(user_id)
+    round = current_round
 
     # Check for previous evaluation
     has_previous = history.last_evaluated_round is not None
