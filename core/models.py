@@ -134,18 +134,42 @@ class History:
                     'incorrect_count': info.get('count', 1)
                 }
 
-    def record_score(self, difficulty: int, score: int) -> None:
-        """Record a score for advancement tracking."""
+    def record_score(self, difficulty: int, score: int, credit: float = 1.0) -> None:
+        """Record a score for advancement tracking.
+
+        Args:
+            difficulty: The difficulty level
+            score: The translation score (0-100)
+            credit: Credit multiplier (1.0 for no hint, 0.5 for hint used)
+        """
         if difficulty == self.difficulty:
-            self.level_scores.append(score)
+            # Store as [score, credit] for tracking
+            self.level_scores.append([score, credit])
             if len(self.level_scores) > ADVANCE_WINDOW_SIZE:
                 self.level_scores = self.level_scores[-ADVANCE_WINDOW_SIZE:]
 
-    def get_good_score_count(self) -> int:
-        return sum(1 for s in self.level_scores if s >= ADVANCE_SCORE_THRESHOLD)
+    def get_good_score_count(self) -> float:
+        """Get total credits from good scores (>=80). Returns float for partial credits."""
+        total = 0.0
+        for entry in self.level_scores:
+            # Handle both old format (int) and new format ([score, credit])
+            if isinstance(entry, list):
+                score, credit = entry
+            else:
+                score, credit = entry, 1.0
+            if score >= ADVANCE_SCORE_THRESHOLD:
+                total += credit
+        return total
 
     def get_poor_score_count(self) -> int:
-        return sum(1 for s in self.level_scores if s < DEMOTE_SCORE_THRESHOLD)
+        """Get count of poor scores (<50)."""
+        count = 0
+        for entry in self.level_scores:
+            # Handle both old format (int) and new format ([score, credit])
+            score = entry[0] if isinstance(entry, list) else entry
+            if score < DEMOTE_SCORE_THRESHOLD:
+                count += 1
+        return count
 
     def check_advancement(self) -> bool:
         if self.difficulty >= MAX_DIFFICULTY:
@@ -260,14 +284,16 @@ class History:
                 else:
                     self.missed_words[word] = {'english': english, 'count': 1}
 
-    def process_evaluation(self, judgement: dict, judge_ms: int, round: TongueRound, hint_words: list[str] = None) -> dict:
+    def process_evaluation(self, judgement: dict, judge_ms: int, round: TongueRound, hint_words: list[str] = None, hint_used: bool = False) -> dict:
         """Process evaluation results and return status."""
         round.judgement = judgement
         round.judge_ms = judge_ms
         round.evaluated = True
 
         score = round.get_score()
-        self.record_score(round.difficulty, score)
+        # Hint used = 0.5 credit, no hint = 1.0 credit
+        credit = 0.5 if hint_used else 1.0
+        self.record_score(round.difficulty, score, credit)
         self.update_words(round, hint_words or [])
         self.total_completed += 1
 

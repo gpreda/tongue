@@ -156,7 +156,7 @@ async function getLearningWords() {
 // UI Functions
 function updateStatusBar(status) {
     elements.levelDisplay.textContent = `Level ${status.difficulty}/${status.max_difficulty}`;
-    elements.progressDisplay.textContent = `Progress: ${status.good_score_count}/7 good scores`;
+    elements.progressDisplay.textContent = `Progress: ${status.good_score_count}/7 credits`;
     elements.completedDisplay.textContent = `Completed: ${status.total_completed}`;
 }
 
@@ -284,7 +284,7 @@ async function showStatusModal() {
             <p><strong>Total Completed:</strong> ${status.total_completed}</p>
             <p><strong>Story Progress:</strong> ${status.story_sentences_remaining} sentences remaining</p>
             <p><strong>Recent Average:</strong> ${avgScore}</p>
-            <p><strong>Good Scores (≥80):</strong> ${status.good_score_count}/7 needed to advance</p>
+            <p><strong>Credits (≥80 score):</strong> ${status.good_score_count}/7 needed to advance</p>
             <p><strong>Poor Scores (<50):</strong> ${status.poor_score_count}/4 triggers demotion</p>
         `;
 

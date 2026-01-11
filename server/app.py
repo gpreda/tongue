@@ -311,12 +311,8 @@ async def submit_translation(request: TranslationRequest):
         request.translation
     )
 
-    # Halve the score if hint was used
-    if request.hint_used:
-        judgement['score'] = int(judgement.get('score', 0) / 2)
-
     current_round.translation = request.translation
-    level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words)
+    level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words, request.hint_used)
     save_history(request.user_id)
 
     return TranslationResponse(
