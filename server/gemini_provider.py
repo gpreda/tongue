@@ -80,9 +80,15 @@ class GeminiProvider(AIProvider):
             {LANGUAGE} Sentence: "{sentence}"
             Student's Translation: "{translation}"
 
-            STEP 1 - ANALYZE THE ORIGINAL SENTENCE FIRST:
-            Before evaluating, carefully identify ALL words and their meanings in the {LANGUAGE} sentence.
-            Consider all possible valid English translations for each word, including synonyms.
+            STEP 1 - WORD-BY-WORD MAPPING (do this carefully):
+            For EACH content word in the {LANGUAGE} sentence:
+            a) List the correct English translation(s)
+            b) Find what English word the student actually used for it
+            c) Determine if they match
+
+            Example analysis:
+            - "escuela" → correct: "school" → student used: "stairs" → MISMATCH (mistranslated)
+            - "caminan" → correct: "walk/walking" → student used: "walk" → MATCH
 
             STEP 2 - EVALUATION RULES:
             1. A word is CORRECTLY translated if the student used a valid English equivalent.
@@ -100,13 +106,14 @@ class GeminiProvider(AIProvider):
 
             STEP 3 - RESPOND with a Python dictionary:
 
-            'vocabulary_breakdown': FIRST, create this list analyzing the ORIGINAL {LANGUAGE} sentence.
-            A list of lists, one for each meaningful word/phrase:
+            'vocabulary_breakdown': A list of lists, one for each meaningful word/phrase:
               [0] The {LANGUAGE} word/phrase from the original sentence
               [1] The correct English translation(s) for this word in context
               [2] Part of speech (noun, verb, adjective, etc.)
-              [3] Boolean: True if the student correctly translated this word (including valid synonyms).
-                  False only if: untranslated, mistranslated, or omitted.
+              [3] Boolean: True ONLY if the student's translation contains a valid English equivalent.
+                  False if: the word was mistranslated (e.g., "escuela"→"stairs" instead of "school"),
+                  left untranslated, or omitted entirely.
+                  IMPORTANT: Check the actual English word the student used, not just sentence meaning.
 
             'correct_translation': A proper English translation of the sentence.
 
