@@ -64,6 +64,7 @@ class History:
         self.story_generate_ms = 0
         self.last_evaluated_round = None
         self.last_level_changed = False
+        self.review_queue = []  # Sentences to review: [{sentence, difficulty, due_at_round}]
 
     def to_dict(self) -> dict:
         return {
@@ -77,7 +78,8 @@ class History:
             'current_story': self.current_story,
             'story_sentences': self.story_sentences,
             'story_difficulty': self.story_difficulty,
-            'story_generate_ms': self.story_generate_ms
+            'story_generate_ms': self.story_generate_ms,
+            'review_queue': self.review_queue
         }
 
     @classmethod
@@ -106,6 +108,7 @@ class History:
         history.story_sentences = data.get('story_sentences', [])
         history.story_difficulty = data.get('story_difficulty')
         history.story_generate_ms = data.get('story_generate_ms', 0)
+        history.review_queue = data.get('review_queue', [])
         return history
 
     def _migrate_legacy_words(self) -> None:
@@ -227,7 +230,17 @@ class History:
         self.story_generate_ms = generate_ms
 
     def get_next_sentence(self) -> TongueRound | None:
-        """Get next sentence from story. Returns None if no sentences available."""
+        """Get next sentence from story or review queue. Returns None if no sentences available."""
+        # Check for due review sentences first
+        for i, review in enumerate(self.review_queue):
+            if review['due_at_round'] <= self.total_completed:
+                # Remove from queue and return this sentence
+                self.review_queue.pop(i)
+                round = TongueRound(review['sentence'], review['difficulty'], 0)
+                self.rounds.append(round)
+                return round
+
+        # Otherwise get next sentence from story
         if not self.story_sentences:
             return None
         sentence = self.story_sentences.pop(0)
@@ -296,6 +309,17 @@ class History:
         self.record_score(round.difficulty, score, credit)
         self.update_words(round, hint_words or [])
         self.total_completed += 1
+
+        # Add low-score sentences to review queue (bring back after 5 rounds)
+        if score <= 50:
+            # Check if sentence is not already in review queue
+            existing = [r['sentence'] for r in self.review_queue]
+            if round.sentence not in existing:
+                self.review_queue.append({
+                    'sentence': round.sentence,
+                    'difficulty': round.difficulty,
+                    'due_at_round': self.total_completed + 5
+                })
 
         level_changed = False
         new_level = self.difficulty
