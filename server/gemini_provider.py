@@ -95,6 +95,7 @@ class GeminiProvider(AIProvider):
                - Using synonyms (these are valid translations)
                - Minor word order differences that don't change meaning
                - Using articles (a/an/the) flexibly
+               - Capitalization differences (e.g., "monday" instead of "Monday", or not capitalizing the first word)
             4. Only proper nouns (names of people, places, brands) may remain in original form.
 
             STEP 3 - RESPOND with a Python dictionary:
@@ -182,7 +183,9 @@ class GeminiProvider(AIProvider):
 
             Already known words (do NOT include these): {', '.join(correct_words[-50:]) if correct_words else 'none'}
 
-            Find ONE noun, ONE verb, and ONE adjective from the sentence that are NOT in the known words list.
+            Find the most challenging/uncommon noun, verb, and adjective from the sentence.
+            Prioritize less common vocabulary that a student would most likely need help with.
+            AVOID basic/common words like: quiere, tiene, es, está, hay, va, hace, puede, debe, dice, sabe, viene, ser, estar, tener, ir, hacer, poder, deber, decir, saber, venir, el, la, un, una, los, las.
             Provide their English translations.
 
             Respond with ONLY a Python dictionary in this exact format:

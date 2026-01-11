@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -166,8 +166,8 @@ async def startup():
 
 @app.get("/")
 async def root():
-    """Health check endpoint."""
-    return {"status": "ok", "service": "tongue-api", "language": LANGUAGE}
+    """Redirect root to the app."""
+    return RedirectResponse(url="/app")
 
 
 # User Management Endpoints
