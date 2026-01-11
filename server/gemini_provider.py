@@ -102,7 +102,9 @@ class GeminiProvider(AIProvider):
                - Minor word order differences that don't change meaning
                - Using articles (a/an/the) flexibly
                - Capitalization differences (e.g., "monday" instead of "Monday", or not capitalizing the first word)
+               - Missing or different punctuation (periods, commas, exclamation marks)
             4. Only proper nouns (names of people, places, brands) may remain in original form.
+            5. If the translation is semantically correct with all words properly translated, the score should be 100.
 
             STEP 3 - RESPOND with a Python dictionary:
 
