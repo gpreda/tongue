@@ -37,6 +37,7 @@ const elements = {
     startScreen: document.getElementById('start-screen'),
     startForm: document.getElementById('start-form'),
     usernameInput: document.getElementById('username-input'),
+    pinInput: document.getElementById('pin-input'),
     usernameError: document.getElementById('username-error'),
     startBtn: document.getElementById('start-btn'),
 
@@ -112,8 +113,18 @@ async function checkUserExists(userId) {
     return api(`/api/users/${encodeURIComponent(userId)}/exists`);
 }
 
-async function createUser(userId) {
-    return api(`/api/users/${encodeURIComponent(userId)}`, { method: 'POST' });
+async function createUser(userId, pin) {
+    return api(`/api/users/${encodeURIComponent(userId)}`, {
+        method: 'POST',
+        body: JSON.stringify({ pin })
+    });
+}
+
+async function loginUser(userId, pin) {
+    return api(`/api/users/${encodeURIComponent(userId)}/login`, {
+        method: 'POST',
+        body: JSON.stringify({ pin })
+    });
 }
 
 // Game APIs (all include user_id)
@@ -452,6 +463,7 @@ function showStartScreen() {
     elements.startScreen.classList.remove('hidden');
     elements.gameScreen.classList.add('hidden');
     elements.usernameInput.value = '';
+    elements.pinInput.value = '';
     elements.usernameError.classList.add('hidden');
     elements.usernameInput.focus();
 }
@@ -467,6 +479,8 @@ async function handleStartForm(e) {
     e.preventDefault();
 
     const username = elements.usernameInput.value.trim();
+    const pin = elements.pinInput.value.trim();
+
     if (!username) {
         showUsernameError('Please enter a name');
         return;
@@ -478,6 +492,12 @@ async function handleStartForm(e) {
         return;
     }
 
+    // Validate PIN (exactly 4 digits)
+    if (!pin || pin.length !== 4 || !/^\d{4}$/.test(pin)) {
+        showUsernameError('PIN must be exactly 4 digits');
+        return;
+    }
+
     elements.startBtn.disabled = true;
     elements.startBtn.textContent = 'Starting...';
 
@@ -486,11 +506,18 @@ async function handleStartForm(e) {
         const { exists } = await checkUserExists(username);
 
         if (exists) {
-            // Name already taken - reject
-            showUsernameError('This name is already taken. Please pick a different name.');
+            // User exists - try to login with PIN
+            const result = await loginUser(username, pin);
+            if (result.success) {
+                currentUser = username;
+                setCookie('tongue_user', username);
+                showGameScreen();
+            } else {
+                showUsernameError(result.error || 'Invalid PIN');
+            }
         } else {
-            // New user - create them
-            const result = await createUser(username);
+            // New user - create them with PIN
+            const result = await createUser(username, pin);
             if (result.success) {
                 currentUser = username;
                 setCookie('tongue_user', username);

@@ -17,9 +17,10 @@
         <div id="start-screen" class="start-screen">
             <div class="start-content">
                 <h2>Welcome!</h2>
-                <p>Enter your name to start or continue your practice:</p>
+                <p>Enter your name and 4-digit PIN to start or continue your practice:</p>
                 <form id="start-form">
                     <input type="text" id="username-input" placeholder="Your name..." autocomplete="off" maxlength="30" required>
+                    <input type="password" id="pin-input" placeholder="4-digit PIN..." autocomplete="off" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" required>
                     <div id="username-error" class="error-message hidden"></div>
                     <button type="submit" id="start-btn" class="btn-primary">Start Practice</button>
                 </form>

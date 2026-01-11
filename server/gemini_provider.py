@@ -1,11 +1,20 @@
 """Gemini AI provider implementation."""
 
 import ast
+import logging
+import random
 import time
 import google.generativeai as genai
 
 from core.interfaces import AIProvider
 from core.config import LANGUAGE, MAX_DIFFICULTY, STORY_SENTENCE_COUNT
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+SEASONS = ["spring", "summer", "autumn", "winter"]
 
 
 class GeminiProvider(AIProvider):
@@ -33,9 +42,22 @@ class GeminiProvider(AIProvider):
     def generate_story(self, correct_words: list, difficulty: int) -> tuple[str, int]:
         avoided_words = correct_words[-100:] if len(correct_words) > 100 else correct_words
 
+        # Generate random elements for story diversity
+        seed = int(time.time() * 1000) % 100000
+        number = random.randint(0, 10)
+        day = random.choice(DAYS_OF_WEEK)
+        season = random.choice(SEASONS)
+        letter = random.choice("ABCDEFGHJLMNPRST")
+
         prompt = f"""
+            Story ID: {seed}
+
             Write a short, engaging story in {LANGUAGE} with approximately {STORY_SENTENCE_COUNT} sentences.
-            The story should be a random, creative narrative (adventure, mystery, daily life, fantasy, etc.).
+
+            MANDATORY elements (you MUST include ALL of these):
+            - The number {number} appears meaningfully in the story
+            - The story takes place on a {day} in {season}
+            - The first sentence must include a noun that starts with the letter "{letter}"
 
             Requirements:
             - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
@@ -99,17 +121,55 @@ class GeminiProvider(AIProvider):
             Return ONLY the dictionary, no other text, no markdown formatting.
         """
         response, ms = self._execute_chat(prompt)
-        judgement = self._sanitize_judgement(response)
+        sanitized = self._sanitize_judgement(response)
+
         try:
-            judgement = ast.literal_eval(judgement)
+            judgement = ast.literal_eval(sanitized)
+
+            # Validate required keys are present
+            required_keys = ['score', 'correct_translation', 'evaluation', 'vocabulary_breakdown']
+            missing_keys = [k for k in required_keys if k not in judgement]
+            if missing_keys:
+                logger.warning(f"AI response missing keys: {missing_keys}")
+                logger.warning(f"Raw response:\n{response}")
+                logger.warning(f"Sanitized response:\n{sanitized}")
+                # Fill in missing keys with defaults
+                if 'score' not in judgement:
+                    judgement['score'] = 50
+                if 'correct_translation' not in judgement:
+                    judgement['correct_translation'] = 'Translation unavailable'
+                if 'evaluation' not in judgement:
+                    judgement['evaluation'] = 'Evaluation unavailable'
+                if 'vocabulary_breakdown' not in judgement:
+                    judgement['vocabulary_breakdown'] = []
+
+            # Validate score is a number
+            if not isinstance(judgement.get('score'), (int, float)):
+                logger.warning(f"Invalid score type: {type(judgement.get('score'))} = {judgement.get('score')}")
+                judgement['score'] = 50
+
         except (SyntaxError, ValueError) as e:
-            print(f"Failed to parse judgement: {e}")
-            print(f"Raw response: {response[:500]}")
+            logger.error(f"Failed to parse judgement: {e}")
+            logger.error(f"Raw response:\n{response}")
+            logger.error(f"Sanitized response:\n{sanitized}")
+
+            # Try to diagnose the issue
+            if '{' not in response:
+                logger.error("Diagnosis: No opening brace '{' found in response")
+            elif '}' not in response:
+                logger.error("Diagnosis: No closing brace '}' found in response")
+            elif sanitized.count('{') != sanitized.count('}'):
+                logger.error(f"Diagnosis: Mismatched braces - {{ count: {sanitized.count('{')}, }} count: {sanitized.count('}')}")
+            elif "'score'" not in response and '"score"' not in response:
+                logger.error("Diagnosis: 'score' key not found in response")
+            else:
+                logger.error("Diagnosis: Unknown parsing issue - possibly malformed Python dict syntax")
+
             # Return a fallback response
             judgement = {
                 'score': 50,
                 'correct_translation': 'Unable to parse response',
-                'evaluation': f'Error parsing AI response. Please try again.',
+                'evaluation': 'Error parsing AI response. Please try again.',
                 'vocabulary_breakdown': []
             }
         return (judgement, ms)
@@ -138,10 +198,29 @@ class GeminiProvider(AIProvider):
             Return ONLY the dictionary, no other text.
         """
         response, ms = self._execute_chat(prompt)
+        raw_response = response
         try:
             response = response.strip()
             response = response.replace('null', 'None')
             response = response.replace('```python', '').replace('```', '')
-            return eval(response)
-        except:
+            hint = eval(response)
+
+            # Validate structure
+            if not isinstance(hint, dict):
+                logger.warning(f"Hint response is not a dict: {type(hint)}")
+                logger.warning(f"Raw response:\n{raw_response}")
+                return None
+
+            return hint
+        except Exception as e:
+            logger.error(f"Failed to parse hint: {e}")
+            logger.error(f"Raw response:\n{raw_response}")
+            logger.error(f"Cleaned response:\n{response}")
+
+            # Diagnose
+            if '{' not in raw_response:
+                logger.error("Diagnosis: No opening brace '{' found")
+            elif '}' not in raw_response:
+                logger.error("Diagnosis: No closing brace '}' found")
+
             return None

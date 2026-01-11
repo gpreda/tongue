@@ -67,7 +67,8 @@ header h1 {
     gap: 15px;
 }
 
-#username-input {
+#username-input,
+#pin-input {
     padding: 15px;
     font-size: 1.1rem;
     border: 2px solid rgba(255, 255, 255, 0.1);
@@ -77,13 +78,20 @@ header h1 {
     text-align: center;
 }
 
-#username-input:focus {
+#username-input:focus,
+#pin-input:focus {
     outline: none;
     border-color: #e94560;
 }
 
-#username-input::placeholder {
+#username-input::placeholder,
+#pin-input::placeholder {
     color: #6c757d;
+}
+
+#pin-input {
+    letter-spacing: 8px;
+    font-size: 1.3rem;
 }
 
 .error-message {

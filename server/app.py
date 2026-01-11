@@ -39,6 +39,14 @@ class HintRequest(BaseModel):
     user_id: str = "default"
 
 
+class CreateUserRequest(BaseModel):
+    pin: str
+
+
+class LoginRequest(BaseModel):
+    pin: str
+
+
 class StoryResponse(BaseModel):
     story: str
     sentences: list[str]
@@ -180,15 +188,46 @@ async def check_user_exists(user_id: str):
 
 
 @app.post("/api/users/{user_id}")
-async def create_user(user_id: str):
-    """Create a new user. Returns error if user already exists."""
+async def create_user(user_id: str, request: CreateUserRequest):
+    """Create a new user with a PIN. Returns error if user already exists."""
     if storage.user_exists(user_id):
         return {"success": False, "error": "User already exists"}
+
+    # Validate PIN is 4 digits
+    if not request.pin or len(request.pin) != 4 or not request.pin.isdigit():
+        return {"success": False, "error": "PIN must be exactly 4 digits"}
 
     # Create empty history for new user
     history = History()
     user_histories[user_id] = history
     save_history(user_id)
+
+    # Save the PIN
+    storage.save_pin(user_id, request.pin)
+
+    return {"success": True, "user_id": user_id}
+
+
+@app.post("/api/users/{user_id}/login")
+async def login_user(user_id: str, request: LoginRequest):
+    """Login an existing user with PIN verification."""
+    if not storage.user_exists(user_id):
+        return {"success": False, "error": "User not found"}
+
+    # Check if user has a PIN set
+    existing_pin = storage.get_pin_hash(user_id)
+
+    if not existing_pin:
+        # Legacy user without PIN - set their PIN now
+        storage.save_pin(user_id, request.pin)
+        return {"success": True, "user_id": user_id}
+
+    # Verify PIN
+    if not storage.verify_pin(user_id, request.pin):
+        return {
+            "success": False,
+            "error": "User name already exists. Please enter the correct PIN or choose a different name to start a new game."
+        }
 
     return {"success": True, "user_id": user_id}
 

@@ -1,9 +1,15 @@
 """File-based storage implementation."""
 
+import hashlib
 import json
 import os
 
 from core.interfaces import Storage
+
+
+def hash_pin(pin: str) -> str:
+    """Hash a PIN using SHA256."""
+    return hashlib.sha256(pin.encode()).hexdigest()
 
 
 class FileStorage(Storage):
@@ -66,5 +72,63 @@ class FileStorage(Storage):
         state_file = self._get_state_file(user_id)
         if os.path.exists(state_file):
             os.remove(state_file)
+            # Also remove PIN if stored
+            pins = self._load_pins()
+            if user_id in pins:
+                del pins[user_id]
+                self._save_pins(pins)
             return True
         return False
+
+    def _get_pins_file(self) -> str:
+        """Get the path to the pins file."""
+        return os.path.join(self.state_dir, 'tongue_pins.json')
+
+    def _load_pins(self) -> dict:
+        """Load all PIN hashes."""
+        pins_file = self._get_pins_file()
+        if os.path.exists(pins_file):
+            try:
+                with open(pins_file, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def _save_pins(self, pins: dict) -> None:
+        """Save all PIN hashes."""
+        pins_file = self._get_pins_file()
+        with open(pins_file, 'w') as f:
+            json.dump(pins, f, indent=2)
+
+    def save_pin(self, user_id: str, pin: str) -> bool:
+        """Save a hashed PIN for a user."""
+        try:
+            pins = self._load_pins()
+            pins[user_id] = hash_pin(pin)
+            self._save_pins(pins)
+            return True
+        except Exception as e:
+            print(f"Error saving PIN: {e}")
+            return False
+
+    def verify_pin(self, user_id: str, pin: str) -> bool:
+        """Verify a PIN for a user."""
+        try:
+            pins = self._load_pins()
+            stored_hash = pins.get(user_id)
+            if stored_hash:
+                return stored_hash == hash_pin(pin)
+            return False
+        except Exception as e:
+            print(f"Error verifying PIN: {e}")
+            return False
+
+    def get_pin_hash(self, user_id: str) -> str | None:
+        """Get the PIN hash for a user (to check if PIN is set)."""
+        try:
+            pins = self._load_pins()
+            return pins.get(user_id)
+        except Exception as e:
+            print(f"Error getting PIN hash: {e}")
+            return None

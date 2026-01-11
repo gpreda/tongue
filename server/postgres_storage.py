@@ -1,11 +1,17 @@
 """PostgreSQL storage implementation."""
 
+import hashlib
 import json
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from core.interfaces import Storage
+
+
+def hash_pin(pin: str) -> str:
+    """Hash a PIN using SHA256."""
+    return hashlib.sha256(pin.encode()).hexdigest()
 
 
 class PostgresStorage(Storage):
@@ -37,6 +43,7 @@ class PostgresStorage(Storage):
                 CREATE TABLE IF NOT EXISTS user_state (
                     user_id VARCHAR(255) PRIMARY KEY,
                     state JSONB NOT NULL,
+                    pin_hash VARCHAR(64),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -44,6 +51,18 @@ class PostgresStorage(Storage):
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_state_updated
                 ON user_state(updated_at)
+            """)
+            # Add pin_hash column if it doesn't exist (for existing databases)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'user_state' AND column_name = 'pin_hash'
+                    ) THEN
+                        ALTER TABLE user_state ADD COLUMN pin_hash VARCHAR(64);
+                    END IF;
+                END $$;
             """)
         self._conn.commit()
 
@@ -130,3 +149,49 @@ class PostgresStorage(Storage):
             print(f"Error deleting user: {e}")
             self.conn.rollback()
             return False
+
+    def save_pin(self, user_id: str, pin: str) -> bool:
+        """Save a hashed PIN for a user."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE user_state SET pin_hash = %s WHERE user_id = %s",
+                    (hash_pin(pin), user_id)
+                )
+                updated = cur.rowcount > 0
+            self.conn.commit()
+            return updated
+        except Exception as e:
+            print(f"Error saving PIN: {e}")
+            self.conn.rollback()
+            return False
+
+    def verify_pin(self, user_id: str, pin: str) -> bool:
+        """Verify a PIN for a user."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pin_hash FROM user_state WHERE user_id = %s",
+                    (user_id,)
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    return row[0] == hash_pin(pin)
+                return False
+        except Exception as e:
+            print(f"Error verifying PIN: {e}")
+            return False
+
+    def get_pin_hash(self, user_id: str) -> str | None:
+        """Get the PIN hash for a user (to check if PIN is set)."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pin_hash FROM user_state WHERE user_id = %s",
+                    (user_id,)
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            print(f"Error getting PIN hash: {e}")
+            return None

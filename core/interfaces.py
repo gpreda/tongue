@@ -39,3 +39,18 @@ class Storage(ABC):
     def save_state(self, state: dict, user_id: str = "default") -> None:
         """Save state for a user."""
         pass
+
+    @abstractmethod
+    def save_pin(self, user_id: str, pin: str) -> bool:
+        """Save a hashed PIN for a user. Returns True on success."""
+        pass
+
+    @abstractmethod
+    def verify_pin(self, user_id: str, pin: str) -> bool:
+        """Verify a PIN for a user. Returns True if PIN matches."""
+        pass
+
+    @abstractmethod
+    def get_pin_hash(self, user_id: str) -> str | None:
+        """Get the PIN hash for a user (to check if PIN is set)."""
+        pass
