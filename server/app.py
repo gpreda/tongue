@@ -73,8 +73,8 @@ class StatusResponse(BaseModel):
     mastered_words_count: int
     missed_words_count: int
     recent_mastered: list[str]
-    level_scores: list[int]
-    good_score_count: int
+    level_scores: list
+    good_score_count: float
     poor_score_count: int
     story_sentences_remaining: int
     progress_display: str
