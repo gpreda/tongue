@@ -383,66 +383,79 @@ async def get_next_sentence(user_id: str = "default"):
 @app.post("/api/translate", response_model=TranslationResponse)
 async def submit_translation(request: TranslationRequest):
     """Submit a translation for evaluation."""
-    history = get_history(request.user_id)
+    import logging
+    logger = logging.getLogger(__name__)
 
-    # Find the current round (last in rounds list)
-    if not history.rounds:
-        raise HTTPException(status_code=400, detail="No active round")
+    try:
+        history = get_history(request.user_id)
 
-    current_round = history.rounds[-1]
-    if current_round.evaluated:
-        raise HTTPException(status_code=400, detail="Round already evaluated")
+        # Find the current round (last in rounds list)
+        if not history.rounds:
+            raise HTTPException(status_code=400, detail="No active round")
 
-    # Handle word challenge vs regular sentence
-    is_word_challenge = current_round.sentence.startswith("WORD:")
+        current_round = history.rounds[-1]
+        if current_round.evaluated:
+            raise HTTPException(status_code=400, detail="Round already evaluated")
 
-    if is_word_challenge:
-        # Word challenge: simple matching
-        word = current_round.sentence[5:]  # Remove "WORD:" prefix
-        word_info = history.words.get(word, {})
-        correct_translation = word_info.get('translation') or ''
+        # Handle word challenge vs regular sentence
+        is_word_challenge = current_round.sentence.startswith("WORD:")
 
-        # Check if translation matches (case-insensitive, handle multiple translations)
-        student_answer = request.translation.strip().lower()
-        correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
-        is_correct = student_answer in correct_answers
+        if is_word_challenge:
+            # Word challenge: simple matching
+            word = current_round.sentence[5:]  # Remove "WORD:" prefix
+            logger.info(f"Word challenge for word: {word}")
+            word_info = history.words.get(word, {})
+            logger.info(f"Word info: {word_info}")
+            correct_translation = word_info.get('translation') or ''
 
-        score = 100 if is_correct else 0
-        judgement = {
-            'score': score,
-            'correct_translation': correct_translation,
-            'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_translation}',
-            'vocabulary_breakdown': [[word, correct_translation, word_info.get('type') or 'unknown', is_correct]]
-        }
-        judge_ms = 0
+            # Check if translation matches (case-insensitive, handle multiple translations)
+            student_answer = request.translation.strip().lower()
+            correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+            is_correct = student_answer in correct_answers
 
-        # Verify sentence matches (use the word for word challenges)
-        if word != request.sentence:
-            raise HTTPException(status_code=400, detail="Sentence mismatch")
-    else:
-        # Regular sentence: AI validation
-        if current_round.sentence != request.sentence:
-            raise HTTPException(status_code=400, detail="Sentence mismatch")
+            score = 100 if is_correct else 0
+            judgement = {
+                'score': score,
+                'correct_translation': correct_translation,
+                'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_translation}',
+                'vocabulary_breakdown': [[word, correct_translation, word_info.get('type') or 'unknown', is_correct]]
+            }
+            judge_ms = 0
 
-        judgement, judge_ms = ai_provider.validate_translation(
-            request.sentence,
-            request.translation
+            # Verify sentence matches (use the word for word challenges)
+            if word != request.sentence:
+                raise HTTPException(status_code=400, detail="Sentence mismatch")
+        else:
+            # Regular sentence: AI validation
+            if current_round.sentence != request.sentence:
+                raise HTTPException(status_code=400, detail="Sentence mismatch")
+
+            judgement, judge_ms = ai_provider.validate_translation(
+                request.sentence,
+                request.translation
+            )
+
+        current_round.translation = request.translation
+        level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words, request.hint_used)
+        save_history(request.user_id)
+
+        return TranslationResponse(
+            score=current_round.get_score(),
+            correct_translation=judgement.get('correct_translation', ''),
+            evaluation=judgement.get('evaluation', ''),
+            vocabulary_breakdown=judgement.get('vocabulary_breakdown', []),
+            judge_ms=judge_ms,
+            level_changed=level_info['level_changed'],
+            new_level=level_info['new_level'],
+            change_type=level_info['change_type']
         )
-
-    current_round.translation = request.translation
-    level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words, request.hint_used)
-    save_history(request.user_id)
-
-    return TranslationResponse(
-        score=current_round.get_score(),
-        correct_translation=judgement.get('correct_translation', ''),
-        evaluation=judgement.get('evaluation', ''),
-        vocabulary_breakdown=judgement.get('vocabulary_breakdown', []),
-        judge_ms=judge_ms,
-        level_changed=level_info['level_changed'],
-        new_level=level_info['new_level'],
-        change_type=level_info['change_type']
-    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in submit_translation: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {str(e)}")
 
 
 @app.post("/api/hint", response_model=HintResponse)
