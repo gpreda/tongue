@@ -101,7 +101,17 @@ const elements = {
     learningBtn: document.getElementById('learning-btn'),
     learningModal: document.getElementById('learning-modal'),
     learningCount: document.getElementById('learning-count'),
-    learningTbody: document.getElementById('learning-tbody')
+    learningTbody: document.getElementById('learning-tbody'),
+
+    // API Stats
+    apiStats: document.getElementById('api-stats'),
+    statsTotalCalls: document.getElementById('stats-total-calls'),
+    statsTotalTokens: document.getElementById('stats-total-tokens'),
+    statsAvgMs: document.getElementById('stats-avg-ms'),
+    statsDetails: document.getElementById('stats-details'),
+    statStory: document.getElementById('stat-story'),
+    statTranslate: document.getElementById('stat-translate'),
+    statHint: document.getElementById('stat-hint')
 };
 
 // API Functions
@@ -170,6 +180,32 @@ async function getMasteredWords() {
 
 async function getLearningWords() {
     return api(`/api/learning-words?user_id=${encodeURIComponent(currentUser)}`);
+}
+
+async function getApiStats() {
+    return api('/api/stats');
+}
+
+async function updateApiStats() {
+    try {
+        const stats = await getApiStats();
+        if (stats.total && stats.total.calls > 0) {
+            elements.apiStats.classList.remove('hidden');
+            elements.statsTotalCalls.textContent = `${stats.total.calls} calls`;
+            elements.statsTotalTokens.textContent = `${stats.total.total_tokens.toLocaleString()} tokens`;
+            elements.statsAvgMs.textContent = `${stats.total.avg_ms}ms avg`;
+
+            // Format detail stats
+            const formatStat = (s) => s.calls > 0
+                ? `${s.calls} calls, ${s.total_tokens.toLocaleString()} tokens, ${s.avg_ms}ms avg`
+                : '0 calls';
+            elements.statStory.textContent = formatStat(stats.story);
+            elements.statTranslate.textContent = formatStat(stats.translate);
+            elements.statHint.textContent = formatStat(stats.hint);
+        }
+    } catch (e) {
+        console.error('Failed to fetch API stats:', e);
+    }
 }
 
 // UI Functions
@@ -418,6 +454,9 @@ async function loadNextSentence() {
         // Show current task
         showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word);
 
+        // Update API stats
+        updateApiStats();
+
     } catch (error) {
         console.error('Error loading sentence:', error);
         elements.loading.innerHTML = '<p>Error loading. <button onclick="loadNextSentence()">Retry</button></p>';
@@ -445,6 +484,9 @@ async function handleSubmit(e) {
 
         // Show result
         showValidationResult(result, translation);
+
+        // Update API stats
+        updateApiStats();
 
     } catch (error) {
         console.error('Error submitting:', error);
@@ -482,6 +524,9 @@ async function handleHint() {
         elements.hintDisplay.innerHTML = hintHtml;
         elements.hintDisplay.classList.remove('hidden');
         hintUsed = true;  // Mark that hint was used
+
+        // Update API stats
+        updateApiStats();
 
     } catch (error) {
         console.error('Error getting hint:', error);
@@ -606,6 +651,11 @@ document.addEventListener('click', (e) => {
     if (!elements.menuBtn.contains(e.target) && !elements.menuDropdown.contains(e.target)) {
         closeMenu();
     }
+});
+
+// Toggle API stats details on click
+elements.apiStats.addEventListener('click', () => {
+    elements.statsDetails.classList.toggle('hidden');
 });
 
 // Close buttons for all modals

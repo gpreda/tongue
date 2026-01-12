@@ -485,6 +485,12 @@ async def get_mastered_words(user_id: str = "default"):
     }
 
 
+@app.get("/api/stats")
+async def get_api_stats():
+    """Get Gemini API usage statistics."""
+    return ai_provider.get_stats()
+
+
 def create_app():
     """Factory function for creating the app (useful for testing)."""
     return app

@@ -25,13 +25,65 @@ class GeminiProvider(AIProvider):
         self.model = genai.GenerativeModel(model_name)
         self.chat = self.model.start_chat(history=[])
         self.model_name = model_name
+        # Stats tracking per call type
+        self.stats = {
+            'story': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+            'translate': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+            'hint': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
+        }
 
-    def _execute_chat(self, prompt: str) -> tuple[str, int]:
+    def _record_stats(self, call_type: str, ms: int, token_stats: dict) -> None:
+        """Record stats for a call type."""
+        if call_type in self.stats:
+            self.stats[call_type]['calls'] += 1
+            self.stats[call_type]['total_ms'] += ms
+            self.stats[call_type]['prompt_tokens'] += token_stats.get('prompt_tokens', 0)
+            self.stats[call_type]['completion_tokens'] += token_stats.get('completion_tokens', 0)
+            self.stats[call_type]['total_tokens'] += token_stats.get('total_tokens', 0)
+
+    def get_stats(self) -> dict:
+        """Get current stats with computed averages."""
+        result = {}
+        totals = {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
+
+        for call_type, stats in self.stats.items():
+            calls = stats['calls']
+            result[call_type] = {
+                **stats,
+                'avg_ms': round(stats['total_ms'] / calls, 1) if calls > 0 else 0,
+                'avg_tokens': round(stats['total_tokens'] / calls, 1) if calls > 0 else 0
+            }
+            for key in totals:
+                totals[key] += stats[key]
+
+        calls = totals['calls']
+        result['total'] = {
+            **totals,
+            'avg_ms': round(totals['total_ms'] / calls, 1) if calls > 0 else 0,
+            'avg_tokens': round(totals['total_tokens'] / calls, 1) if calls > 0 else 0
+        }
+        return result
+
+    def _execute_chat(self, prompt: str) -> tuple[str, int, dict]:
+        """Execute chat and return (text, ms, token_stats)."""
         start_time = time.time()
         response = self.chat.send_message(prompt)
         end_time = time.time()
         ms = int((end_time - start_time) * 1000)
-        return (response.text, ms)
+
+        # Extract token stats from usage_metadata
+        token_stats = {
+            'prompt_tokens': 0,
+            'completion_tokens': 0,
+            'total_tokens': 0
+        }
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            metadata = response.usage_metadata
+            token_stats['prompt_tokens'] = getattr(metadata, 'prompt_token_count', 0)
+            token_stats['completion_tokens'] = getattr(metadata, 'candidates_token_count', 0)
+            token_stats['total_tokens'] = getattr(metadata, 'total_token_count', 0)
+
+        return (response.text, ms, token_stats)
 
     def _sanitize_judgement(self, judgement: str) -> str:
         s = judgement[judgement.find('{'):judgement.rfind('}')+1]
@@ -71,7 +123,9 @@ class GeminiProvider(AIProvider):
             Write only the story text, no titles, no translations, no explanations.
             Each sentence should end with proper punctuation (. ! ?).
         """
-        return self._execute_chat(prompt)
+        text, ms, token_stats = self._execute_chat(prompt)
+        self._record_stats('story', ms, token_stats)
+        return (text, ms)
 
     def validate_translation(self, sentence: str, translation: str) -> tuple[dict, int]:
         prompt = f"""
@@ -130,7 +184,8 @@ class GeminiProvider(AIProvider):
 
             Return ONLY the dictionary, no other text, no markdown formatting.
         """
-        response, ms = self._execute_chat(prompt)
+        response, ms, token_stats = self._execute_chat(prompt)
+        self._record_stats('translate', ms, token_stats)
         sanitized = self._sanitize_judgement(response)
 
         try:
@@ -209,7 +264,8 @@ class GeminiProvider(AIProvider):
 
             Return ONLY the dictionary, no other text.
         """
-        response, ms = self._execute_chat(prompt)
+        response, ms, token_stats = self._execute_chat(prompt)
+        self._record_stats('hint', ms, token_stats)
         raw_response = response
         try:
             response = response.strip()
