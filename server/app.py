@@ -412,7 +412,7 @@ async def submit_translation(request: TranslationRequest):
             'score': score,
             'correct_translation': correct_translation,
             'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_translation}',
-            'vocabulary_breakdown': [[word, correct_translation, word_info.get('type', 'unknown'), is_correct]]
+            'vocabulary_breakdown': [[word, correct_translation, word_info.get('type') or 'unknown', is_correct]]
         }
         judge_ms = 0
 
