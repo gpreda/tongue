@@ -400,7 +400,7 @@ async def submit_translation(request: TranslationRequest):
         # Word challenge: simple matching
         word = current_round.sentence[5:]  # Remove "WORD:" prefix
         word_info = history.words.get(word, {})
-        correct_translation = word_info.get('translation', '')
+        correct_translation = word_info.get('translation') or ''
 
         # Check if translation matches (case-insensitive, handle multiple translations)
         student_answer = request.translation.strip().lower()
