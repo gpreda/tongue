@@ -334,6 +334,55 @@ header h1 {
     font-size: 0.85rem;
 }
 
+.verb-challenge-notice {
+    background: rgba(52, 152, 219, 0.2);
+    color: #3498db;
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+}
+
+.verb-hint {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+.tense-select-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.tense-select-row label {
+    color: #8892b0;
+}
+
+#tense-select {
+    flex: 1;
+    padding: 12px;
+    font-size: 1rem;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
+    cursor: pointer;
+}
+
+#tense-select:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+#tense-select option {
+    background: #1a1a2e;
+    color: #fff;
+}
+
 .current-sentence {
     font-size: 1.4rem;
     color: #fff;

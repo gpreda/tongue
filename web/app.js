@@ -11,6 +11,7 @@ let hintUsed = false;
 let hintWords = [];  // Words that were given as hints
 let isWordChallenge = false;  // Track if current task is a word challenge
 let isVocabChallenge = false;  // Track if current task is a vocab challenge
+let isVerbChallenge = false;  // Track if current task is a verb challenge
 
 // Cookie helpers
 function setCookie(name, value, days = 365) {
@@ -79,6 +80,9 @@ const elements = {
     wordType: document.getElementById('word-type'),
     vocabChallengeNotice: document.getElementById('vocab-challenge-notice'),
     vocabCategory: document.getElementById('vocab-category'),
+    verbChallengeNotice: document.getElementById('verb-challenge-notice'),
+    tenseSelectRow: document.getElementById('tense-select-row'),
+    tenseSelect: document.getElementById('tense-select'),
     taskPrompt: document.getElementById('task-prompt'),
 
     validationResult: document.getElementById('validation-result'),
@@ -162,7 +166,7 @@ async function getNextSentence() {
     return api(`/api/next?user_id=${encodeURIComponent(currentUser)}`);
 }
 
-async function submitTranslation(sentence, translation) {
+async function submitTranslation(sentence, translation, selectedTense = null) {
     return api('/api/translate', {
         method: 'POST',
         body: JSON.stringify({
@@ -170,7 +174,8 @@ async function submitTranslation(sentence, translation) {
             translation,
             user_id: currentUser,
             hint_used: hintUsed,
-            hint_words: hintWords
+            hint_words: hintWords,
+            selected_tense: selectedTense
         })
     });
 }
@@ -275,7 +280,7 @@ function showPreviousEvaluation(eval_data) {
     }
 }
 
-function showCurrentTask(sentence, isReview = false, isWordChallenge = false, challengeWord = null, isVocabChallenge = false, vocabChallenge = null) {
+function showCurrentTask(sentence, isReview = false, isWordChallenge = false, challengeWord = null, isVocabChallenge = false, vocabChallenge = null, isVerbChallenge = false, verbChallenge = null) {
     elements.loading.classList.add('hidden');
     elements.currentTask.classList.remove('hidden');
     elements.validationResult.classList.add('hidden');
@@ -294,13 +299,22 @@ function showCurrentTask(sentence, isReview = false, isWordChallenge = false, ch
         elements.reviewNotice.classList.add('hidden');
     }
 
-    // Reset challenge notices
+    // Reset challenge notices and tense dropdown
     elements.wordChallengeNotice.classList.add('hidden');
     elements.vocabChallengeNotice.classList.add('hidden');
+    elements.verbChallengeNotice.classList.add('hidden');
+    elements.tenseSelectRow.classList.add('hidden');
+    elements.tenseSelect.value = '';
     elements.currentSentence.classList.remove('word-challenge');
 
     // Show appropriate challenge notice
-    if (isVocabChallenge && vocabChallenge) {
+    if (isVerbChallenge && verbChallenge) {
+        elements.verbChallengeNotice.classList.remove('hidden');
+        elements.tenseSelectRow.classList.remove('hidden');
+        elements.taskPrompt.textContent = 'Translate this verb:';
+        elements.currentSentence.classList.add('word-challenge');
+        elements.hintBtn.classList.add('hidden');  // No hints for verb challenges
+    } else if (isVocabChallenge && vocabChallenge) {
         elements.vocabChallengeNotice.classList.remove('hidden');
         elements.vocabCategory.textContent = vocabChallenge.category_name;
         elements.taskPrompt.textContent = 'Translate this word:';
@@ -450,13 +464,14 @@ async function loadNextSentence() {
         currentStory = data.story;
         isWordChallenge = data.is_word_challenge;
         isVocabChallenge = data.is_vocab_challenge;
+        isVerbChallenge = data.is_verb_challenge;
 
         // Update status bar
         const status = await getStatus();
         updateStatusBar(status);
 
         // Render story (hide for challenges)
-        if (data.is_word_challenge || data.is_vocab_challenge) {
+        if (data.is_word_challenge || data.is_vocab_challenge || data.is_verb_challenge) {
             elements.storySection.classList.add('hidden');
         } else {
             renderStory(data.story, data.difficulty, data.sentence);
@@ -470,7 +485,7 @@ async function loadNextSentence() {
         }
 
         // Show current task
-        showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word, data.is_vocab_challenge, data.vocab_challenge);
+        showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word, data.is_vocab_challenge, data.vocab_challenge, data.is_verb_challenge, data.verb_challenge);
 
         // Update API stats
         updateApiStats();
@@ -490,11 +505,22 @@ async function handleSubmit(e) {
         return;
     }
 
+    // For verb challenges, require tense selection
+    let selectedTense = null;
+    if (isVerbChallenge) {
+        selectedTense = elements.tenseSelect.value;
+        if (!selectedTense) {
+            alert('Please select the tense for this verb.');
+            elements.tenseSelect.focus();
+            return;
+        }
+    }
+
     elements.submitBtn.disabled = true;
     elements.submitBtn.textContent = 'Validating...';
 
     try {
-        const result = await submitTranslation(currentSentence, translation);
+        const result = await submitTranslation(currentSentence, translation, selectedTense);
 
         // Update status bar
         const status = await getStatus();

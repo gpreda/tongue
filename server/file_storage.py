@@ -175,3 +175,49 @@ class FileStorage(Storage):
         except Exception as e:
             print(f"Error saving word translation: {e}")
             raise
+
+    def _get_conjugations_file(self) -> str:
+        """Get the path to the verb conjugations file."""
+        return os.path.join(self.state_dir, 'tongue_conjugations.json')
+
+    def _load_conjugations(self) -> dict:
+        """Load all verb conjugations."""
+        conj_file = self._get_conjugations_file()
+        if os.path.exists(conj_file):
+            try:
+                with open(conj_file, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def _save_conjugations(self, conjugations: dict) -> None:
+        """Save all verb conjugations."""
+        conj_file = self._get_conjugations_file()
+        with open(conj_file, 'w') as f:
+            json.dump(conjugations, f, indent=2)
+
+    def get_verb_conjugation(self, conjugated_form: str) -> dict | None:
+        """Get stored conjugation info for a verb form."""
+        try:
+            conjugations = self._load_conjugations()
+            return conjugations.get(conjugated_form)
+        except Exception as e:
+            print(f"Error getting verb conjugation: {e}")
+            return None
+
+    def save_verb_conjugation(self, conjugated_form: str, base_verb: str, tense: str,
+                              translation: str, person: str) -> None:
+        """Save conjugation info for a verb form."""
+        try:
+            conjugations = self._load_conjugations()
+            conjugations[conjugated_form] = {
+                'base_verb': base_verb,
+                'tense': tense,
+                'translation': translation,
+                'person': person
+            }
+            self._save_conjugations(conjugations)
+        except Exception as e:
+            print(f"Error saving verb conjugation: {e}")
+            raise

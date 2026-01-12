@@ -64,3 +64,15 @@ class Storage(ABC):
     def save_word_translation(self, word: str, translation: str, word_type: str) -> None:
         """Save translation for a word."""
         pass
+
+    @abstractmethod
+    def get_verb_conjugation(self, conjugated_form: str) -> dict | None:
+        """Get stored conjugation info for a verb form.
+        Returns {base_verb, tense, translation, person} or None."""
+        pass
+
+    @abstractmethod
+    def save_verb_conjugation(self, conjugated_form: str, base_verb: str, tense: str,
+                              translation: str, person: str) -> None:
+        """Save conjugation info for a verb form."""
+        pass

@@ -73,6 +73,17 @@ class PostgresStorage(Storage):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Verb conjugations table (shared across all users)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS verb_conjugations (
+                    conjugated_form VARCHAR(255) PRIMARY KEY,
+                    base_verb VARCHAR(255) NOT NULL,
+                    tense VARCHAR(50) NOT NULL,
+                    translation VARCHAR(500) NOT NULL,
+                    person VARCHAR(50) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         self._conn.commit()
 
     def close(self):
@@ -238,5 +249,47 @@ class PostgresStorage(Storage):
             self.conn.commit()
         except Exception as e:
             print(f"Error saving word translation: {e}")
+            self.conn.rollback()
+            raise
+
+    def get_verb_conjugation(self, conjugated_form: str) -> dict | None:
+        """Get stored conjugation info for a verb form."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT base_verb, tense, translation, person
+                       FROM verb_conjugations WHERE conjugated_form = %s""",
+                    (conjugated_form,)
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        'base_verb': row['base_verb'],
+                        'tense': row['tense'],
+                        'translation': row['translation'],
+                        'person': row['person']
+                    }
+                return None
+        except Exception as e:
+            print(f"Error getting verb conjugation: {e}")
+            return None
+
+    def save_verb_conjugation(self, conjugated_form: str, base_verb: str, tense: str,
+                              translation: str, person: str) -> None:
+        """Save conjugation info for a verb form."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO verb_conjugations (conjugated_form, base_verb, tense, translation, person)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (conjugated_form) DO UPDATE SET
+                        base_verb = EXCLUDED.base_verb,
+                        tense = EXCLUDED.tense,
+                        translation = EXCLUDED.translation,
+                        person = EXCLUDED.person
+                """, (conjugated_form, base_verb, tense, translation, person))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Error saving verb conjugation: {e}")
             self.conn.rollback()
             raise

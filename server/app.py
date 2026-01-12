@@ -32,6 +32,7 @@ class TranslationRequest(BaseModel):
     user_id: str = "default"
     hint_used: bool = False
     hint_words: list[str] = []
+    selected_tense: Optional[str] = None  # For verb challenges
 
 
 class HintRequest(BaseModel):
@@ -99,8 +100,14 @@ class NextSentenceResponse(BaseModel):
     challenge_word: Optional[dict]  # {word, type, translation} for word challenges
     is_vocab_challenge: bool = False
     vocab_challenge: Optional[dict] = None  # {word, translation, category, category_name}
+    is_verb_challenge: bool = False
+    verb_challenge: Optional[dict] = None  # {conjugated_form, base_verb, tense, translation, person}
     has_previous_evaluation: bool
     previous_evaluation: Optional[dict]
+
+
+# Valid tenses for verb challenges
+VALID_TENSES = ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive']
 
 
 # Global state (in production, use proper DI)
@@ -287,7 +294,7 @@ async def get_story(user_id: str = "default", force_new: bool = False):
 
 @app.get("/api/next", response_model=NextSentenceResponse)
 async def get_next_sentence(user_id: str = "default"):
-    """Get the next sentence, word challenge, or vocab challenge for translation."""
+    """Get the next sentence, word challenge, vocab challenge, or verb challenge."""
     history = get_history(user_id)
 
     # Check if there's an existing unevaluated round (e.g., after page refresh)
@@ -295,8 +302,10 @@ async def get_next_sentence(user_id: str = "default"):
     is_review = False
     is_word_challenge = False
     is_vocab_challenge = False
+    is_verb_challenge = False
     challenge_word = None
     vocab_challenge = None
+    verb_challenge = None
 
     if history.rounds:
         last_round = history.rounds[-1]
@@ -332,11 +341,47 @@ async def get_next_sentence(user_id: str = "default"):
                         'category': category,
                         'category_name': get_category_name(category)
                     }
+            # Check if this was a verb challenge (sentence starts with "VERB:")
+            elif last_round.sentence.startswith("VERB:"):
+                is_verb_challenge = True
+                conjugated_form = last_round.sentence[5:]  # Remove "VERB:" prefix
+                # Get verb info from storage
+                stored = storage.get_verb_conjugation(conjugated_form)
+                if stored:
+                    verb_challenge = {
+                        'conjugated_form': conjugated_form,
+                        **stored
+                    }
 
     # Only get a new sentence/challenge if there's no current unevaluated round
     if current_round is None:
+        # Check if it's verb challenge turn (every 7th turn)
+        if history.is_verb_challenge_turn():
+            verb_word = history.get_verb_for_challenge()
+            if verb_word:
+                # Check storage for existing conjugation, or query AI
+                stored = storage.get_verb_conjugation(verb_word)
+                if stored:
+                    verb_challenge = {'conjugated_form': verb_word, **stored}
+                else:
+                    # Query AI for verb conjugation
+                    ai_result = ai_provider.analyze_verb_conjugation(verb_word)
+                    if ai_result:
+                        storage.save_verb_conjugation(
+                            verb_word, ai_result['base_verb'], ai_result['tense'],
+                            ai_result['translation'], ai_result['person']
+                        )
+                        verb_challenge = {'conjugated_form': verb_word, **ai_result}
+
+                if verb_challenge:
+                    is_verb_challenge = True
+                    from core.models import TongueRound
+                    current_round = TongueRound(f"VERB:{verb_word}", history.difficulty, 0)
+                    history.rounds.append(current_round)
+                    save_history(user_id)
+
         # Check if it's vocab challenge turn (every 5th turn, offset by 2)
-        if history.is_vocab_challenge_turn():
+        if current_round is None and history.is_vocab_challenge_turn():
             vocab_challenge = history.get_vocab_challenge()
             if vocab_challenge:
                 is_vocab_challenge = True
@@ -403,6 +448,8 @@ async def get_next_sentence(user_id: str = "default"):
         # Extract just the word from VOCAB:category:word
         parts = sentence.split(":", 2)
         sentence = parts[2] if len(parts) == 3 else sentence
+    elif is_verb_challenge and sentence.startswith("VERB:"):
+        sentence = sentence[5:]  # Remove prefix for display
 
     return NextSentenceResponse(
         sentence=sentence,
@@ -415,6 +462,8 @@ async def get_next_sentence(user_id: str = "default"):
         challenge_word=challenge_word,
         is_vocab_challenge=is_vocab_challenge,
         vocab_challenge=vocab_challenge,
+        is_verb_challenge=is_verb_challenge,
+        verb_challenge=verb_challenge,
         has_previous_evaluation=has_previous,
         previous_evaluation=previous_eval
     )
@@ -440,8 +489,70 @@ async def submit_translation(request: TranslationRequest):
         # Handle different challenge types
         is_word_challenge = current_round.sentence.startswith("WORD:")
         is_vocab_challenge = current_round.sentence.startswith("VOCAB:")
+        is_verb_challenge = current_round.sentence.startswith("VERB:")
 
-        if is_vocab_challenge:
+        if is_verb_challenge:
+            # Verb challenge: check both translation AND tense
+            conjugated_form = current_round.sentence[5:]  # Remove "VERB:" prefix
+            logger.info(f"Verb challenge for: {conjugated_form}")
+
+            # Get verb info from storage (should already be there from get_next_sentence)
+            stored = storage.get_verb_conjugation(conjugated_form)
+            if not stored:
+                # Fallback: query AI
+                ai_result = ai_provider.analyze_verb_conjugation(conjugated_form)
+                if ai_result:
+                    storage.save_verb_conjugation(
+                        conjugated_form, ai_result['base_verb'], ai_result['tense'],
+                        ai_result['translation'], ai_result['person']
+                    )
+                    stored = ai_result
+
+            if not stored:
+                raise HTTPException(status_code=500, detail="Could not analyze verb")
+
+            correct_translation = stored['translation']
+            correct_tense = stored['tense']
+
+            # Parse correct answers (comma-separated)
+            correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+
+            # Check translation (case-insensitive)
+            student_answer = request.translation.strip().lower()
+            translation_correct = student_answer in correct_answers
+
+            # Check tense
+            selected_tense = (request.selected_tense or '').lower()
+            tense_correct = selected_tense == correct_tense
+
+            # Both must be correct for full score
+            if translation_correct and tense_correct:
+                score = 100
+                evaluation = 'Correct!'
+            elif translation_correct:
+                score = 50
+                evaluation = f'Translation correct, but the tense is {correct_tense}, not {selected_tense}.'
+            elif tense_correct:
+                score = 50
+                evaluation = f'Tense correct, but the translation should be: {correct_translation}'
+            else:
+                score = 0
+                evaluation = f'The translation is "{correct_translation}" and the tense is {correct_tense}.'
+
+            judgement = {
+                'score': score,
+                'correct_translation': correct_translation,
+                'correct_tense': correct_tense,
+                'evaluation': evaluation,
+                'vocabulary_breakdown': [[conjugated_form, correct_translation, 'verb', translation_correct and tense_correct]]
+            }
+            judge_ms = 0
+
+            # Verify sentence matches
+            if conjugated_form != request.sentence:
+                raise HTTPException(status_code=400, detail="Sentence mismatch")
+
+        elif is_vocab_challenge:
             # Vocabulary category challenge: simple matching
             # Format: VOCAB:category:word
             parts = current_round.sentence.split(":", 2)

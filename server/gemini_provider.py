@@ -336,3 +336,77 @@ class GeminiProvider(AIProvider):
             logger.error(f"Failed to parse word translation: {e}")
             logger.error(f"Raw response:\n{raw_response}")
             return None
+
+    def analyze_verb_conjugation(self, conjugated_form: str) -> dict | None:
+        """Analyze a conjugated Spanish verb form.
+        Returns dict with base_verb, tense, translation, person or None on error."""
+        prompt = f"""
+            Analyze this conjugated {LANGUAGE} verb:
+
+            Verb form: "{conjugated_form}"
+
+            Identify:
+            1. The infinitive (base form) of the verb
+            2. The tense - must be one of: present, preterite, imperfect, future, conditional, subjunctive
+            3. The English translation of this specific conjugated form
+            4. The person - must be one of: first_singular, second_singular, third_singular, first_plural, second_plural, third_plural
+
+            IMPORTANT tense definitions:
+            - present: yo hablo, tú hablas, él habla (I speak, you speak, he speaks)
+            - preterite: yo hablé, tú hablaste, él habló (I spoke, you spoke, he spoke) - completed past action
+            - imperfect: yo hablaba, tú hablabas, él hablaba (I was speaking, I used to speak) - ongoing/habitual past
+            - future: yo hablaré, tú hablarás, él hablará (I will speak)
+            - conditional: yo hablaría, tú hablarías, él hablaría (I would speak)
+            - subjunctive: que yo hable, que tú hables, que él hable (that I speak) - subjunctive mood
+
+            Respond with ONLY a Python dictionary in this exact format:
+            {{'base_verb': 'infinitive', 'tense': 'tense_name', 'translation': 'english', 'person': 'person_code'}}
+
+            Examples:
+            - "corrió" -> {{'base_verb': 'correr', 'tense': 'preterite', 'translation': 'ran, he ran, she ran', 'person': 'third_singular'}}
+            - "hablamos" -> {{'base_verb': 'hablar', 'tense': 'present', 'translation': 'we speak, we talk', 'person': 'first_plural'}}
+            - "comía" -> {{'base_verb': 'comer', 'tense': 'imperfect', 'translation': 'was eating, used to eat', 'person': 'first_singular'}}
+
+            Return ONLY the dictionary, no other text.
+        """
+        response, ms, token_stats = self._execute_chat(prompt)
+        self._record_stats('translate', ms, token_stats)
+        raw_response = response
+        try:
+            response = response.strip()
+            response = response.replace('```python', '').replace('```', '')
+            result = eval(response)
+
+            if not isinstance(result, dict):
+                logger.warning(f"Verb conjugation response is not a dict: {type(result)}")
+                return None
+
+            required_fields = ['base_verb', 'tense', 'translation', 'person']
+            for field in required_fields:
+                if field not in result:
+                    logger.warning(f"Verb conjugation missing required field: {field}")
+                    return None
+
+            # Validate tense is one of expected values
+            valid_tenses = ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive']
+            if result['tense'] not in valid_tenses:
+                logger.warning(f"Invalid tense '{result['tense']}', expected one of {valid_tenses}")
+                # Try to normalize common variations
+                tense_map = {
+                    'past': 'preterite',
+                    'simple_past': 'preterite',
+                    'past_simple': 'preterite',
+                    'present_subjunctive': 'subjunctive',
+                    'imperfecto': 'imperfect',
+                    'preterito': 'preterite',
+                    'futuro': 'future',
+                    'condicional': 'conditional',
+                    'presente': 'present',
+                }
+                result['tense'] = tense_map.get(result['tense'].lower(), result['tense'])
+
+            return result
+        except Exception as e:
+            logger.error(f"Failed to parse verb conjugation: {e}")
+            logger.error(f"Raw response:\n{raw_response}")
+            return None

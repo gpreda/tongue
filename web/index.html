@@ -65,10 +65,26 @@
                     <span class="challenge-label">Vocabulary Quiz!</span>
                     <span id="vocab-category" class="vocab-category"></span>
                 </div>
+                <div id="verb-challenge-notice" class="verb-challenge-notice hidden">
+                    <span class="challenge-label">Verb Challenge!</span>
+                    <span class="verb-hint">Translate AND identify the tense</span>
+                </div>
                 <h3 id="task-prompt">Translate this sentence:</h3>
                 <p id="current-sentence" class="current-sentence"></p>
                 <form id="translation-form">
                     <input type="text" id="translation-input" placeholder="Enter your English translation..." autocomplete="off">
+                    <div id="tense-select-row" class="tense-select-row hidden">
+                        <label for="tense-select">Select tense:</label>
+                        <select id="tense-select">
+                            <option value="">-- Choose tense --</option>
+                            <option value="present">Present</option>
+                            <option value="preterite">Preterite (Simple Past)</option>
+                            <option value="imperfect">Imperfect</option>
+                            <option value="future">Future</option>
+                            <option value="conditional">Conditional</option>
+                            <option value="subjunctive">Subjunctive</option>
+                        </select>
+                    </div>
                     <div class="button-row">
                         <button type="submit" id="submit-btn" class="btn-primary">Submit</button>
                         <button type="button" id="hint-btn" class="btn-secondary">Hint</button>

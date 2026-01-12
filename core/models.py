@@ -495,3 +495,24 @@ class History:
             self.vocab_progress[category][word]['correct'] += 1
         else:
             self.vocab_progress[category][word]['incorrect'] += 1
+
+    def is_verb_challenge_turn(self) -> bool:
+        """Check if this turn should be a verb challenge."""
+        # Every 7th turn (offset from other challenges)
+        if self.total_completed < 7:
+            return False
+        return self.total_completed % 7 == 0
+
+    def get_verb_for_challenge(self) -> str | None:
+        """Get a verb from user's word history for verb challenge.
+        Returns the Spanish verb or None if no verbs available."""
+        verbs = []
+        for word, info in self.words.items():
+            word_type = (info.get('type') or '').lower()
+            if word_type == 'verb':
+                verbs.append(word)
+
+        if not verbs:
+            return None
+
+        return random.choice(verbs)
