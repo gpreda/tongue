@@ -132,3 +132,46 @@ class FileStorage(Storage):
         except Exception as e:
             print(f"Error getting PIN hash: {e}")
             return None
+
+    def _get_translations_file(self) -> str:
+        """Get the path to the word translations file."""
+        return os.path.join(self.state_dir, 'tongue_translations.json')
+
+    def _load_translations(self) -> dict:
+        """Load all word translations."""
+        trans_file = self._get_translations_file()
+        if os.path.exists(trans_file):
+            try:
+                with open(trans_file, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def _save_translations(self, translations: dict) -> None:
+        """Save all word translations."""
+        trans_file = self._get_translations_file()
+        with open(trans_file, 'w') as f:
+            json.dump(translations, f, indent=2)
+
+    def get_word_translation(self, word: str) -> dict | None:
+        """Get stored translation for a word."""
+        try:
+            translations = self._load_translations()
+            return translations.get(word)
+        except Exception as e:
+            print(f"Error getting word translation: {e}")
+            return None
+
+    def save_word_translation(self, word: str, translation: str, word_type: str) -> None:
+        """Save translation for a word."""
+        try:
+            translations = self._load_translations()
+            translations[word] = {
+                'translation': translation,
+                'type': word_type
+            }
+            self._save_translations(translations)
+        except Exception as e:
+            print(f"Error saving word translation: {e}")
+            raise

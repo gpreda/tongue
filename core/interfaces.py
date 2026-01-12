@@ -54,3 +54,13 @@ class Storage(ABC):
     def get_pin_hash(self, user_id: str) -> str | None:
         """Get the PIN hash for a user (to check if PIN is set)."""
         pass
+
+    @abstractmethod
+    def get_word_translation(self, word: str) -> dict | None:
+        """Get stored translation for a word. Returns {translation, type} or None."""
+        pass
+
+    @abstractmethod
+    def save_word_translation(self, word: str, translation: str, word_type: str) -> None:
+        """Save translation for a word."""
+        pass

@@ -292,3 +292,47 @@ class GeminiProvider(AIProvider):
                 logger.error("Diagnosis: No closing brace '}' found")
 
             return None
+
+    def get_word_translation(self, word: str) -> dict | None:
+        """Get translation and type for a Spanish word.
+        Returns dict with 'translation' and 'type' or None on error."""
+        prompt = f"""
+            Translate this {LANGUAGE} word to English:
+
+            Word: "{word}"
+
+            Provide:
+            1. The English translation(s) - if multiple common translations exist, separate with commas
+            2. The part of speech (noun, verb, adjective, adverb, etc.)
+
+            Respond with ONLY a Python dictionary in this exact format:
+            {{'translation': 'english translation(s)', 'type': 'part of speech'}}
+
+            Examples:
+            - "casa" -> {{'translation': 'house, home', 'type': 'noun'}}
+            - "correr" -> {{'translation': 'to run', 'type': 'verb'}}
+            - "rápido" -> {{'translation': 'fast, quick', 'type': 'adjective'}}
+
+            Return ONLY the dictionary, no other text.
+        """
+        response, ms, token_stats = self._execute_chat(prompt)
+        self._record_stats('translate', ms, token_stats)  # Count under translate stats
+        raw_response = response
+        try:
+            response = response.strip()
+            response = response.replace('```python', '').replace('```', '')
+            result = eval(response)
+
+            if not isinstance(result, dict):
+                logger.warning(f"Word translation response is not a dict: {type(result)}")
+                return None
+
+            if 'translation' not in result or 'type' not in result:
+                logger.warning(f"Word translation missing required fields: {result}")
+                return None
+
+            return result
+        except Exception as e:
+            logger.error(f"Failed to parse word translation: {e}")
+            logger.error(f"Raw response:\n{raw_response}")
+            return None

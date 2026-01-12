@@ -10,6 +10,7 @@ let storySentences = [];
 let hintUsed = false;
 let hintWords = [];  // Words that were given as hints
 let isWordChallenge = false;  // Track if current task is a word challenge
+let isVocabChallenge = false;  // Track if current task is a vocab challenge
 
 // Cookie helpers
 function setCookie(name, value, days = 365) {
@@ -76,6 +77,8 @@ const elements = {
     reviewNotice: document.getElementById('review-notice'),
     wordChallengeNotice: document.getElementById('word-challenge-notice'),
     wordType: document.getElementById('word-type'),
+    vocabChallengeNotice: document.getElementById('vocab-challenge-notice'),
+    vocabCategory: document.getElementById('vocab-category'),
     taskPrompt: document.getElementById('task-prompt'),
 
     validationResult: document.getElementById('validation-result'),
@@ -272,7 +275,7 @@ function showPreviousEvaluation(eval_data) {
     }
 }
 
-function showCurrentTask(sentence, isReview = false, isWordChallenge = false, challengeWord = null) {
+function showCurrentTask(sentence, isReview = false, isWordChallenge = false, challengeWord = null, isVocabChallenge = false, vocabChallenge = null) {
     elements.loading.classList.add('hidden');
     elements.currentTask.classList.remove('hidden');
     elements.validationResult.classList.add('hidden');
@@ -291,17 +294,26 @@ function showCurrentTask(sentence, isReview = false, isWordChallenge = false, ch
         elements.reviewNotice.classList.add('hidden');
     }
 
-    // Show word challenge notice and style
-    if (isWordChallenge && challengeWord) {
+    // Reset challenge notices
+    elements.wordChallengeNotice.classList.add('hidden');
+    elements.vocabChallengeNotice.classList.add('hidden');
+    elements.currentSentence.classList.remove('word-challenge');
+
+    // Show appropriate challenge notice
+    if (isVocabChallenge && vocabChallenge) {
+        elements.vocabChallengeNotice.classList.remove('hidden');
+        elements.vocabCategory.textContent = vocabChallenge.category_name;
+        elements.taskPrompt.textContent = 'Translate this word:';
+        elements.currentSentence.classList.add('word-challenge');
+        elements.hintBtn.classList.add('hidden');  // No hints for vocab challenges
+    } else if (isWordChallenge && challengeWord) {
         elements.wordChallengeNotice.classList.remove('hidden');
         elements.wordType.textContent = challengeWord.type;
         elements.taskPrompt.textContent = 'Translate this word:';
         elements.currentSentence.classList.add('word-challenge');
         elements.hintBtn.classList.add('hidden');  // No hints for word challenges
     } else {
-        elements.wordChallengeNotice.classList.add('hidden');
         elements.taskPrompt.textContent = 'Translate this sentence:';
-        elements.currentSentence.classList.remove('word-challenge');
         elements.hintBtn.classList.remove('hidden');
     }
 }
@@ -437,13 +449,14 @@ async function loadNextSentence() {
         currentSentence = data.sentence;
         currentStory = data.story;
         isWordChallenge = data.is_word_challenge;
+        isVocabChallenge = data.is_vocab_challenge;
 
         // Update status bar
         const status = await getStatus();
         updateStatusBar(status);
 
-        // Render story (hide for word challenges)
-        if (data.is_word_challenge) {
+        // Render story (hide for challenges)
+        if (data.is_word_challenge || data.is_vocab_challenge) {
             elements.storySection.classList.add('hidden');
         } else {
             renderStory(data.story, data.difficulty, data.sentence);
@@ -457,7 +470,7 @@ async function loadNextSentence() {
         }
 
         // Show current task
-        showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word);
+        showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word, data.is_vocab_challenge, data.vocab_challenge);
 
         // Update API stats
         updateApiStats();

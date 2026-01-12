@@ -69,6 +69,8 @@ class History:
         self.last_evaluated_round = None
         self.last_level_changed = False
         self.review_queue = []  # Sentences to review: [{sentence, difficulty, due_at_round}]
+        # Vocabulary challenge progress: {category: {word: {correct: int, incorrect: int}}}
+        self.vocab_progress = {}
 
     def to_dict(self) -> dict:
         return {
@@ -83,7 +85,8 @@ class History:
             'story_sentences': self.story_sentences,
             'story_difficulty': self.story_difficulty,
             'story_generate_ms': self.story_generate_ms,
-            'review_queue': self.review_queue
+            'review_queue': self.review_queue,
+            'vocab_progress': self.vocab_progress
         }
 
     @classmethod
@@ -113,6 +116,7 @@ class History:
         history.story_difficulty = data.get('story_difficulty')
         history.story_generate_ms = data.get('story_generate_ms', 0)
         history.review_queue = data.get('review_queue', [])
+        history.vocab_progress = data.get('vocab_progress', {})
         return history
 
     def _migrate_legacy_words(self) -> None:
@@ -437,3 +441,57 @@ class History:
             'type': chosen['type'],
             'translation': chosen['translation']
         }
+
+    def is_vocab_challenge_turn(self) -> bool:
+        """Check if this turn should be a vocabulary category challenge."""
+        # Every 5th turn (offset from word challenges)
+        if self.total_completed < 5:
+            return False
+        return self.total_completed % 5 == 2  # Offset so it doesn't overlap with word challenges
+
+    def get_vocab_challenge(self) -> dict | None:
+        """Get a vocabulary challenge from a random category.
+        Returns dict with: word, translation, category, category_name
+        Prioritizes words the user hasn't mastered yet."""
+        from core.vocabulary import get_all_categories, get_random_challenge
+
+        categories = get_all_categories()
+        random.shuffle(categories)
+
+        for category in categories:
+            # Get words user has mastered in this category
+            mastered = self._get_mastered_vocab_words(category)
+
+            challenge = get_random_challenge(category, exclude_words=mastered)
+            if challenge:
+                return challenge
+
+        return None
+
+    def _get_mastered_vocab_words(self, category: str) -> list[str]:
+        """Get list of words user has mastered in a category (>=2 correct, >=80% rate)."""
+        mastered = []
+        if category not in self.vocab_progress:
+            return mastered
+
+        for word, stats in self.vocab_progress[category].items():
+            correct = stats.get('correct', 0)
+            incorrect = stats.get('incorrect', 0)
+            total = correct + incorrect
+            if total >= 2 and correct / total >= 0.8:
+                mastered.append(word)
+
+        return mastered
+
+    def record_vocab_result(self, category: str, word: str, is_correct: bool) -> None:
+        """Record result of a vocabulary challenge."""
+        if category not in self.vocab_progress:
+            self.vocab_progress[category] = {}
+
+        if word not in self.vocab_progress[category]:
+            self.vocab_progress[category][word] = {'correct': 0, 'incorrect': 0}
+
+        if is_correct:
+            self.vocab_progress[category][word]['correct'] += 1
+        else:
+            self.vocab_progress[category][word]['incorrect'] += 1

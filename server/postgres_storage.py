@@ -64,6 +64,15 @@ class PostgresStorage(Storage):
                     END IF;
                 END $$;
             """)
+            # Word translations table (shared across all users)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS word_translations (
+                    word VARCHAR(255) PRIMARY KEY,
+                    translation VARCHAR(500) NOT NULL,
+                    word_type VARCHAR(50) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         self._conn.commit()
 
     def close(self):
@@ -195,3 +204,39 @@ class PostgresStorage(Storage):
         except Exception as e:
             print(f"Error getting PIN hash: {e}")
             return None
+
+    def get_word_translation(self, word: str) -> dict | None:
+        """Get stored translation for a word."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT translation, word_type FROM word_translations WHERE word = %s",
+                    (word,)
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        'translation': row['translation'],
+                        'type': row['word_type']
+                    }
+                return None
+        except Exception as e:
+            print(f"Error getting word translation: {e}")
+            return None
+
+    def save_word_translation(self, word: str, translation: str, word_type: str) -> None:
+        """Save translation for a word."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO word_translations (word, translation, word_type)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (word) DO UPDATE SET
+                        translation = EXCLUDED.translation,
+                        word_type = EXCLUDED.word_type
+                """, (word, translation, word_type))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Error saving word translation: {e}")
+            self.conn.rollback()
+            raise

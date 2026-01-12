@@ -315,6 +315,25 @@ header h1 {
     padding: 30px;
 }
 
+.vocab-challenge-notice {
+    background: rgba(46, 204, 113, 0.2);
+    color: #2ecc71;
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+}
+
+.vocab-category {
+    background: rgba(46, 204, 113, 0.3);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+}
+
 .current-sentence {
     font-size: 1.4rem;
     color: #fff;

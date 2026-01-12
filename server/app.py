@@ -97,6 +97,8 @@ class NextSentenceResponse(BaseModel):
     is_review: bool
     is_word_challenge: bool
     challenge_word: Optional[dict]  # {word, type, translation} for word challenges
+    is_vocab_challenge: bool = False
+    vocab_challenge: Optional[dict] = None  # {word, translation, category, category_name}
     has_previous_evaluation: bool
     previous_evaluation: Optional[dict]
 
@@ -285,14 +287,16 @@ async def get_story(user_id: str = "default", force_new: bool = False):
 
 @app.get("/api/next", response_model=NextSentenceResponse)
 async def get_next_sentence(user_id: str = "default"):
-    """Get the next sentence or word challenge for translation."""
+    """Get the next sentence, word challenge, or vocab challenge for translation."""
     history = get_history(user_id)
 
     # Check if there's an existing unevaluated round (e.g., after page refresh)
     current_round = None
     is_review = False
     is_word_challenge = False
+    is_vocab_challenge = False
     challenge_word = None
+    vocab_challenge = None
 
     if history.rounds:
         last_round = history.rounds[-1]
@@ -312,11 +316,41 @@ async def get_next_sentence(user_id: str = "default"):
                         'type': info['type'],
                         'translation': info['translation']
                     }
+            # Check if this was a vocab challenge (sentence starts with "VOCAB:")
+            elif last_round.sentence.startswith("VOCAB:"):
+                is_vocab_challenge = True
+                # Format: VOCAB:category:word
+                parts = last_round.sentence.split(":", 2)
+                if len(parts) == 3:
+                    from core.vocabulary import get_category_name, get_category_items
+                    category = parts[1]
+                    word = parts[2]
+                    items = get_category_items(category)
+                    vocab_challenge = {
+                        'word': word,
+                        'translation': items.get(word, ''),
+                        'category': category,
+                        'category_name': get_category_name(category)
+                    }
 
     # Only get a new sentence/challenge if there's no current unevaluated round
     if current_round is None:
+        # Check if it's vocab challenge turn (every 5th turn, offset by 2)
+        if history.is_vocab_challenge_turn():
+            vocab_challenge = history.get_vocab_challenge()
+            if vocab_challenge:
+                is_vocab_challenge = True
+                from core.models import TongueRound
+                # Store as VOCAB:category:word
+                current_round = TongueRound(
+                    f"VOCAB:{vocab_challenge['category']}:{vocab_challenge['word']}",
+                    history.difficulty, 0
+                )
+                history.rounds.append(current_round)
+                save_history(user_id)
+
         # Check if it's word challenge turn
-        if history.is_word_challenge_turn():
+        if current_round is None and history.is_word_challenge_turn():
             challenge_word = history.get_challenge_word()
             if challenge_word:
                 is_word_challenge = True
@@ -326,7 +360,7 @@ async def get_next_sentence(user_id: str = "default"):
                 history.rounds.append(current_round)
                 save_history(user_id)
 
-        # If not word challenge (or no words available), get regular sentence
+        # If not any challenge, get regular sentence
         if current_round is None:
             # Generate story if needed
             if history.needs_new_story():
@@ -361,10 +395,14 @@ async def get_next_sentence(user_id: str = "default"):
         }
         history.last_evaluated_round = None
 
-    # For word challenges, return the word; for sentences, return the sentence
+    # For challenges, return just the word; for sentences, return the sentence
     sentence = round.sentence
     if is_word_challenge and sentence.startswith("WORD:"):
         sentence = sentence[5:]  # Remove prefix for display
+    elif is_vocab_challenge and sentence.startswith("VOCAB:"):
+        # Extract just the word from VOCAB:category:word
+        parts = sentence.split(":", 2)
+        sentence = parts[2] if len(parts) == 3 else sentence
 
     return NextSentenceResponse(
         sentence=sentence,
@@ -375,6 +413,8 @@ async def get_next_sentence(user_id: str = "default"):
         is_review=is_review,
         is_word_challenge=is_word_challenge,
         challenge_word=challenge_word,
+        is_vocab_challenge=is_vocab_challenge,
+        vocab_challenge=vocab_challenge,
         has_previous_evaluation=has_previous,
         previous_evaluation=previous_eval
     )
@@ -397,23 +437,27 @@ async def submit_translation(request: TranslationRequest):
         if current_round.evaluated:
             raise HTTPException(status_code=400, detail="Round already evaluated")
 
-        # Handle word challenge vs regular sentence
+        # Handle different challenge types
         is_word_challenge = current_round.sentence.startswith("WORD:")
+        is_vocab_challenge = current_round.sentence.startswith("VOCAB:")
 
-        if is_word_challenge:
-            # Word challenge: simple matching
-            word = current_round.sentence[5:]  # Remove "WORD:" prefix
-            logger.info(f"Word challenge for word: {word}")
-            word_info = history.words.get(word, {})
-            logger.info(f"Word info: {word_info}")
-            correct_translation = word_info.get('translation') or ''
+        if is_vocab_challenge:
+            # Vocabulary category challenge: simple matching
+            # Format: VOCAB:category:word
+            parts = current_round.sentence.split(":", 2)
+            if len(parts) != 3:
+                raise HTTPException(status_code=400, detail="Invalid vocab challenge format")
 
-            # Handle translation being either a string or list
-            if isinstance(correct_translation, list):
-                correct_answers = [t.strip().lower() for t in correct_translation]
-                correct_translation = ', '.join(correct_translation)  # For display
-            else:
-                correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+            category = parts[1]
+            word = parts[2]
+            logger.info(f"Vocab challenge: category={category}, word={word}")
+
+            from core.vocabulary import get_category_items
+            items = get_category_items(category)
+            correct_translation = items.get(word, '')
+
+            # Parse correct answers (comma-separated)
+            correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
 
             # Check if translation matches (case-insensitive)
             student_answer = request.translation.strip().lower()
@@ -424,7 +468,61 @@ async def submit_translation(request: TranslationRequest):
                 'score': score,
                 'correct_translation': correct_translation,
                 'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_translation}',
-                'vocabulary_breakdown': [[word, correct_translation, word_info.get('type') or 'unknown', is_correct]]
+                'vocabulary_breakdown': [[word, correct_translation, category, is_correct]]
+            }
+            judge_ms = 0
+
+            # Record vocab challenge result
+            history.record_vocab_result(category, word, is_correct)
+
+            # Verify sentence matches
+            if word != request.sentence:
+                raise HTTPException(status_code=400, detail="Sentence mismatch")
+
+        elif is_word_challenge:
+            # Word challenge: get translation from storage or AI
+            word = current_round.sentence[5:]  # Remove "WORD:" prefix
+            logger.info(f"Word challenge for word: {word}")
+
+            # First check persistent storage for translation
+            stored_translation = storage.get_word_translation(word)
+
+            if stored_translation:
+                logger.info(f"Using stored translation: {stored_translation}")
+                correct_translation = stored_translation['translation']
+                word_type = stored_translation['type']
+            else:
+                # Query AI for translation and store it
+                logger.info(f"Querying AI for translation of: {word}")
+                ai_result = ai_provider.get_word_translation(word)
+                if ai_result:
+                    correct_translation = ai_result['translation']
+                    word_type = ai_result['type']
+                    # Save to persistent storage
+                    storage.save_word_translation(word, correct_translation, word_type)
+                    logger.info(f"Saved translation: {correct_translation} ({word_type})")
+                else:
+                    # Fallback to user's word history if AI fails
+                    word_info = history.words.get(word, {})
+                    correct_translation = word_info.get('translation') or ''
+                    word_type = word_info.get('type') or 'unknown'
+                    # Handle list translations
+                    if isinstance(correct_translation, list):
+                        correct_translation = ', '.join(correct_translation)
+
+            # Parse correct answers (comma-separated)
+            correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+
+            # Check if translation matches (case-insensitive)
+            student_answer = request.translation.strip().lower()
+            is_correct = student_answer in correct_answers
+
+            score = 100 if is_correct else 0
+            judgement = {
+                'score': score,
+                'correct_translation': correct_translation,
+                'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_translation}',
+                'vocabulary_breakdown': [[word, correct_translation, word_type, is_correct]]
             }
             judge_ms = 0
 
