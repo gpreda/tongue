@@ -408,9 +408,15 @@ async def submit_translation(request: TranslationRequest):
             logger.info(f"Word info: {word_info}")
             correct_translation = word_info.get('translation') or ''
 
-            # Check if translation matches (case-insensitive, handle multiple translations)
+            # Handle translation being either a string or list
+            if isinstance(correct_translation, list):
+                correct_answers = [t.strip().lower() for t in correct_translation]
+                correct_translation = ', '.join(correct_translation)  # For display
+            else:
+                correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+
+            # Check if translation matches (case-insensitive)
             student_answer = request.translation.strip().lower()
-            correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
             is_correct = student_answer in correct_answers
 
             score = 100 if is_correct else 0
