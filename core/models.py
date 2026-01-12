@@ -71,6 +71,12 @@ class History:
         self.review_queue = []  # Sentences to review: [{sentence, difficulty, due_at_round}]
         # Vocabulary challenge progress: {category: {word: {correct: int, incorrect: int}}}
         self.vocab_progress = {}
+        # Challenge stats (separate from level progress)
+        self.challenge_stats = {
+            'word': {'correct': 0, 'incorrect': 0},
+            'vocab': {'correct': 0, 'incorrect': 0},
+            'verb': {'correct': 0, 'incorrect': 0}
+        }
 
     def to_dict(self) -> dict:
         return {
@@ -86,7 +92,8 @@ class History:
             'story_difficulty': self.story_difficulty,
             'story_generate_ms': self.story_generate_ms,
             'review_queue': self.review_queue,
-            'vocab_progress': self.vocab_progress
+            'vocab_progress': self.vocab_progress,
+            'challenge_stats': self.challenge_stats
         }
 
     @classmethod
@@ -117,6 +124,11 @@ class History:
         history.story_generate_ms = data.get('story_generate_ms', 0)
         history.review_queue = data.get('review_queue', [])
         history.vocab_progress = data.get('vocab_progress', {})
+        history.challenge_stats = data.get('challenge_stats', {
+            'word': {'correct': 0, 'incorrect': 0},
+            'vocab': {'correct': 0, 'incorrect': 0},
+            'verb': {'correct': 0, 'incorrect': 0}
+        })
         return history
 
     def _migrate_legacy_words(self) -> None:
@@ -516,3 +528,22 @@ class History:
             return None
 
         return random.choice(verbs)
+
+    def record_challenge_result(self, challenge_type: str, is_correct: bool) -> None:
+        """Record result of a challenge (word, vocab, or verb).
+        This is separate from level progress."""
+        if challenge_type not in self.challenge_stats:
+            self.challenge_stats[challenge_type] = {'correct': 0, 'incorrect': 0}
+
+        if is_correct:
+            self.challenge_stats[challenge_type]['correct'] += 1
+        else:
+            self.challenge_stats[challenge_type]['incorrect'] += 1
+
+    def get_challenge_stats_display(self) -> str:
+        """Get a display string for challenge stats."""
+        total_correct = sum(s['correct'] for s in self.challenge_stats.values())
+        total_attempts = total_correct + sum(s['incorrect'] for s in self.challenge_stats.values())
+        if total_attempts == 0:
+            return "0/0"
+        return f"{total_correct}/{total_attempts}"

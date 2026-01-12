@@ -52,6 +52,7 @@ const elements = {
     statusBar: document.getElementById('status-bar'),
     levelDisplay: document.getElementById('level-display'),
     progressDisplay: document.getElementById('progress-display'),
+    challengeDisplay: document.getElementById('challenge-display'),
     completedDisplay: document.getElementById('completed-display'),
     statusBtn: document.getElementById('status-btn'),
 
@@ -225,6 +226,7 @@ async function updateApiStats() {
 function updateStatusBar(status) {
     elements.levelDisplay.textContent = `L${status.difficulty}`;
     elements.progressDisplay.textContent = `${status.good_score_count}/7`;
+    elements.challengeDisplay.textContent = status.challenge_stats_display || '0/0';
     elements.completedDisplay.textContent = `${status.total_completed}`;
 }
 

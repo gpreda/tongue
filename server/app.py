@@ -87,6 +87,8 @@ class StatusResponse(BaseModel):
     poor_score_count: int
     story_sentences_remaining: int
     progress_display: str
+    challenge_stats: dict  # {word: {correct, incorrect}, vocab: {...}, verb: {...}}
+    challenge_stats_display: str  # "12/15" format
 
 
 class NextSentenceResponse(BaseModel):
@@ -261,7 +263,9 @@ async def get_status(user_id: str = "default"):
         good_score_count=history.get_good_score_count(),
         poor_score_count=history.get_poor_score_count(),
         story_sentences_remaining=len(history.story_sentences),
-        progress_display=history.get_progress_display()
+        progress_display=history.get_progress_display(),
+        challenge_stats=history.challenge_stats,
+        challenge_stats_display=history.get_challenge_stats_display()
     )
 
 
@@ -651,6 +655,37 @@ async def submit_translation(request: TranslationRequest):
             )
 
         current_round.translation = request.translation
+
+        # Challenges have separate scoring, don't affect level progress
+        if is_verb_challenge or is_vocab_challenge or is_word_challenge:
+            current_round.judgement = judgement
+            current_round.judge_ms = judge_ms
+            current_round.evaluated = True
+            history.total_completed += 1
+
+            # Record challenge stats
+            challenge_type = 'verb' if is_verb_challenge else ('vocab' if is_vocab_challenge else 'word')
+            is_fully_correct = judgement.get('score', 0) >= 100
+            history.record_challenge_result(challenge_type, is_fully_correct)
+
+            # For word challenges, also update word tracking for learning
+            if is_word_challenge:
+                history.update_words(current_round, request.hint_words or [])
+
+            save_history(request.user_id)
+
+            return TranslationResponse(
+                score=current_round.get_score(),
+                correct_translation=judgement.get('correct_translation', ''),
+                evaluation=judgement.get('evaluation', ''),
+                vocabulary_breakdown=judgement.get('vocabulary_breakdown', []),
+                judge_ms=judge_ms,
+                level_changed=False,
+                new_level=history.difficulty,
+                change_type=None
+            )
+
+        # Regular sentences affect level progress
         level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words, request.hint_used)
         save_history(request.user_id)
 
