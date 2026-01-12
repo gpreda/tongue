@@ -121,7 +121,12 @@ async function api(endpoint, options = {}) {
         ...options
     });
     if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
+        let detail = `API error: ${response.status}`;
+        try {
+            const data = await response.json();
+            if (data.detail) detail = data.detail;
+        } catch (e) {}
+        throw new Error(detail);
     }
     return response.json();
 }
