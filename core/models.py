@@ -263,7 +263,7 @@ class History:
         for v_breakdown in round.judgement['vocabulary_breakdown']:
             word = v_breakdown[0]
             english = v_breakdown[1]
-            part_of_speech = v_breakdown[2].lower()
+            part_of_speech = (v_breakdown[2] or 'unknown').lower()
             was_correct = v_breakdown[3]
 
             # Skip words that were given as hints (don't count for stats)
@@ -412,8 +412,8 @@ class History:
                 if success_rate <= 0.7:
                     candidates.append({
                         'word': word,
-                        'type': info['type'],
-                        'translation': info['translation'],
+                        'type': info['type'] or 'unknown',
+                        'translation': info['translation'] or '',
                         'success_rate': success_rate
                     })
 
@@ -425,8 +425,8 @@ class History:
             info = self.words[word]
             return {
                 'word': word,
-                'type': info['type'],
-                'translation': info['translation']
+                'type': info['type'] or 'unknown',
+                'translation': info['translation'] or ''
             }
 
         # Weight by inverse success rate (lower success = higher chance)
