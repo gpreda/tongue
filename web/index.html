@@ -57,7 +57,11 @@
             </div>
             <div id="current-task" class="hidden">
                 <div id="review-notice" class="review-notice hidden">Let's try this one again!</div>
-                <h3>Translate this sentence:</h3>
+                <div id="word-challenge-notice" class="word-challenge-notice hidden">
+                    <span class="challenge-label">Word Challenge!</span>
+                    <span id="word-type" class="word-type"></span>
+                </div>
+                <h3 id="task-prompt">Translate this sentence:</h3>
                 <p id="current-sentence" class="current-sentence"></p>
                 <form id="translation-form">
                     <input type="text" id="translation-input" placeholder="Enter your English translation..." autocomplete="off">

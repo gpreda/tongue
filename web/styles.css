@@ -285,6 +285,36 @@ header h1 {
     text-align: center;
 }
 
+.word-challenge-notice {
+    background: rgba(155, 89, 182, 0.2);
+    color: #9b59b6;
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+}
+
+.challenge-label {
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+.word-type {
+    background: rgba(155, 89, 182, 0.3);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+}
+
+.current-sentence.word-challenge {
+    font-size: 2rem;
+    text-align: center;
+    padding: 30px;
+}
+
 .current-sentence {
     font-size: 1.4rem;
     color: #fff;

@@ -9,6 +9,7 @@ let currentStory = null;
 let storySentences = [];
 let hintUsed = false;
 let hintWords = [];  // Words that were given as hints
+let isWordChallenge = false;  // Track if current task is a word challenge
 
 // Cookie helpers
 function setCookie(name, value, days = 365) {
@@ -73,6 +74,9 @@ const elements = {
     hintBtn: document.getElementById('hint-btn'),
     hintDisplay: document.getElementById('hint-display'),
     reviewNotice: document.getElementById('review-notice'),
+    wordChallengeNotice: document.getElementById('word-challenge-notice'),
+    wordType: document.getElementById('word-type'),
+    taskPrompt: document.getElementById('task-prompt'),
 
     validationResult: document.getElementById('validation-result'),
     resultScore: document.getElementById('result-score'),
@@ -227,7 +231,7 @@ function showPreviousEvaluation(eval_data) {
     }
 }
 
-function showCurrentTask(sentence, isReview = false) {
+function showCurrentTask(sentence, isReview = false, isWordChallenge = false, challengeWord = null) {
     elements.loading.classList.add('hidden');
     elements.currentTask.classList.remove('hidden');
     elements.validationResult.classList.add('hidden');
@@ -244,6 +248,20 @@ function showCurrentTask(sentence, isReview = false) {
         elements.reviewNotice.classList.remove('hidden');
     } else {
         elements.reviewNotice.classList.add('hidden');
+    }
+
+    // Show word challenge notice and style
+    if (isWordChallenge && challengeWord) {
+        elements.wordChallengeNotice.classList.remove('hidden');
+        elements.wordType.textContent = challengeWord.type;
+        elements.taskPrompt.textContent = 'Translate this word:';
+        elements.currentSentence.classList.add('word-challenge');
+        elements.hintBtn.classList.add('hidden');  // No hints for word challenges
+    } else {
+        elements.wordChallengeNotice.classList.add('hidden');
+        elements.taskPrompt.textContent = 'Translate this sentence:';
+        elements.currentSentence.classList.remove('word-challenge');
+        elements.hintBtn.classList.remove('hidden');
     }
 }
 
@@ -377,13 +395,18 @@ async function loadNextSentence() {
 
         currentSentence = data.sentence;
         currentStory = data.story;
+        isWordChallenge = data.is_word_challenge;
 
         // Update status bar
         const status = await getStatus();
         updateStatusBar(status);
 
-        // Render story
-        renderStory(data.story, data.difficulty, data.sentence);
+        // Render story (hide for word challenges)
+        if (data.is_word_challenge) {
+            elements.storySection.classList.add('hidden');
+        } else {
+            renderStory(data.story, data.difficulty, data.sentence);
+        }
 
         // Show previous evaluation if any
         if (data.has_previous_evaluation && data.previous_evaluation) {
@@ -393,7 +416,7 @@ async function loadNextSentence() {
         }
 
         // Show current task
-        showCurrentTask(data.sentence, data.is_review);
+        showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word);
 
     } catch (error) {
         console.error('Error loading sentence:', error);

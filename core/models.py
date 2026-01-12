@@ -1,11 +1,15 @@
 """Domain models for tongue application."""
 
+import random
+
 from .config import (
     MIN_DIFFICULTY, MAX_DIFFICULTY,
     ADVANCE_WINDOW_SIZE, ADVANCE_SCORE_THRESHOLD, ADVANCE_REQUIRED_GOOD,
     DEMOTE_SCORE_THRESHOLD, DEMOTE_REQUIRED_POOR
 )
 from .utils import split_into_sentences
+
+WORD_CHALLENGE_INTERVAL = 3  # Every 3rd turn
 
 
 class TongueRound:
@@ -385,3 +389,51 @@ class History:
                         'success_rate': round(success_rate * 100, 1)
                     })
         return sorted(learning, key=lambda x: x['total'], reverse=True)
+
+    def is_word_challenge_turn(self) -> bool:
+        """Check if this turn should be a word challenge."""
+        # Need at least some words to challenge
+        if len(self.words) < 3:
+            return False
+        # Every Nth turn (but not the first few)
+        if self.total_completed < WORD_CHALLENGE_INTERVAL:
+            return False
+        return self.total_completed % WORD_CHALLENGE_INTERVAL == 0
+
+    def get_challenge_word(self) -> dict | None:
+        """Get a word for word challenge. Picks from low success rate words.
+        Returns dict with word, type, translation or None if no words available."""
+        # Get words with low success rate (<=70%)
+        candidates = []
+        for word, info in self.words.items():
+            total = info['correct_count'] + info['incorrect_count']
+            if total > 0:
+                success_rate = info['correct_count'] / total
+                if success_rate <= 0.7:
+                    candidates.append({
+                        'word': word,
+                        'type': info['type'],
+                        'translation': info['translation'],
+                        'success_rate': success_rate
+                    })
+
+        if not candidates:
+            # Fall back to any word if no low success rate words
+            if not self.words:
+                return None
+            word = random.choice(list(self.words.keys()))
+            info = self.words[word]
+            return {
+                'word': word,
+                'type': info['type'],
+                'translation': info['translation']
+            }
+
+        # Weight by inverse success rate (lower success = higher chance)
+        weights = [(1 - c['success_rate'] + 0.1) for c in candidates]
+        chosen = random.choices(candidates, weights=weights, k=1)[0]
+        return {
+            'word': chosen['word'],
+            'type': chosen['type'],
+            'translation': chosen['translation']
+        }

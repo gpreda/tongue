@@ -95,6 +95,8 @@ class NextSentenceResponse(BaseModel):
     sentences_remaining: int
     progress_display: str
     is_review: bool
+    is_word_challenge: bool
+    challenge_word: Optional[dict]  # {word, type, translation} for word challenges
     has_previous_evaluation: bool
     previous_evaluation: Optional[dict]
 
@@ -283,35 +285,63 @@ async def get_story(user_id: str = "default", force_new: bool = False):
 
 @app.get("/api/next", response_model=NextSentenceResponse)
 async def get_next_sentence(user_id: str = "default"):
-    """Get the next sentence for translation."""
+    """Get the next sentence or word challenge for translation."""
     history = get_history(user_id)
 
     # Check if there's an existing unevaluated round (e.g., after page refresh)
     current_round = None
     is_review = False
+    is_word_challenge = False
+    challenge_word = None
+
     if history.rounds:
         last_round = history.rounds[-1]
         if not last_round.evaluated:
             current_round = last_round
             # Check if this was a review sentence (generate_ms=0 indicates review)
             is_review = last_round.generate_ms == 0
+            # Check if this was a word challenge (sentence starts with "WORD:")
+            if last_round.sentence.startswith("WORD:"):
+                is_word_challenge = True
+                word = last_round.sentence[5:]  # Remove "WORD:" prefix
+                # Get word info
+                if word in history.words:
+                    info = history.words[word]
+                    challenge_word = {
+                        'word': word,
+                        'type': info['type'],
+                        'translation': info['translation']
+                    }
 
-    # Only get a new sentence if there's no current unevaluated round
+    # Only get a new sentence/challenge if there's no current unevaluated round
     if current_round is None:
-        # Generate story if needed
-        if history.needs_new_story():
-            story, ms = ai_provider.generate_story(
-                history.correct_words,
-                history.difficulty
-            )
-            history.set_story(story, history.difficulty, ms)
-            save_history(user_id)
+        # Check if it's word challenge turn
+        if history.is_word_challenge_turn():
+            challenge_word = history.get_challenge_word()
+            if challenge_word:
+                is_word_challenge = True
+                # Create a special round for word challenge
+                from core.models import TongueRound
+                current_round = TongueRound(f"WORD:{challenge_word['word']}", history.difficulty, 0)
+                history.rounds.append(current_round)
+                save_history(user_id)
 
-        # Get next sentence
-        current_round, is_review = history.get_next_sentence()
-        if not current_round:
-            raise HTTPException(status_code=500, detail="No sentences available")
-        save_history(user_id)
+        # If not word challenge (or no words available), get regular sentence
+        if current_round is None:
+            # Generate story if needed
+            if history.needs_new_story():
+                story, ms = ai_provider.generate_story(
+                    history.correct_words,
+                    history.difficulty
+                )
+                history.set_story(story, history.difficulty, ms)
+                save_history(user_id)
+
+            # Get next sentence
+            current_round, is_review = history.get_next_sentence()
+            if not current_round:
+                raise HTTPException(status_code=500, detail="No sentences available")
+            save_history(user_id)
 
     round = current_round
 
@@ -331,13 +361,20 @@ async def get_next_sentence(user_id: str = "default"):
         }
         history.last_evaluated_round = None
 
+    # For word challenges, return the word; for sentences, return the sentence
+    sentence = round.sentence
+    if is_word_challenge and sentence.startswith("WORD:"):
+        sentence = sentence[5:]  # Remove prefix for display
+
     return NextSentenceResponse(
-        sentence=round.sentence,
+        sentence=sentence,
         difficulty=round.difficulty,
         story=history.current_story or "",
         sentences_remaining=len(history.story_sentences),
         progress_display=history.get_progress_display(),
         is_review=is_review,
+        is_word_challenge=is_word_challenge,
+        challenge_word=challenge_word,
         has_previous_evaluation=has_previous,
         previous_evaluation=previous_eval
     )
@@ -356,14 +393,41 @@ async def submit_translation(request: TranslationRequest):
     if current_round.evaluated:
         raise HTTPException(status_code=400, detail="Round already evaluated")
 
-    if current_round.sentence != request.sentence:
-        raise HTTPException(status_code=400, detail="Sentence mismatch")
+    # Handle word challenge vs regular sentence
+    is_word_challenge = current_round.sentence.startswith("WORD:")
 
-    # Evaluate translation
-    judgement, judge_ms = ai_provider.validate_translation(
-        request.sentence,
-        request.translation
-    )
+    if is_word_challenge:
+        # Word challenge: simple matching
+        word = current_round.sentence[5:]  # Remove "WORD:" prefix
+        word_info = history.words.get(word, {})
+        correct_translation = word_info.get('translation', '')
+
+        # Check if translation matches (case-insensitive, handle multiple translations)
+        student_answer = request.translation.strip().lower()
+        correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+        is_correct = student_answer in correct_answers
+
+        score = 100 if is_correct else 0
+        judgement = {
+            'score': score,
+            'correct_translation': correct_translation,
+            'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_translation}',
+            'vocabulary_breakdown': [[word, correct_translation, word_info.get('type', 'unknown'), is_correct]]
+        }
+        judge_ms = 0
+
+        # Verify sentence matches (use the word for word challenges)
+        if word != request.sentence:
+            raise HTTPException(status_code=400, detail="Sentence mismatch")
+    else:
+        # Regular sentence: AI validation
+        if current_round.sentence != request.sentence:
+            raise HTTPException(status_code=400, detail="Sentence mismatch")
+
+        judgement, judge_ms = ai_provider.validate_translation(
+            request.sentence,
+            request.translation
+        )
 
     current_round.translation = request.translation
     level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words, request.hint_used)
