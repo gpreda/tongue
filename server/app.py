@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -125,6 +126,32 @@ user_histories: dict[str, History] = {}
 # Background story generation
 pending_stories: dict[str, dict] = {}  # user_id -> {story, difficulty, ms, task}
 story_generation_locks: dict[str, asyncio.Lock] = {}  # Prevent duplicate generations
+
+# Session tracking
+user_sessions: dict[str, str] = {}  # user_id -> session_id
+
+
+def get_session_id(user_id: str) -> str:
+    """Get or create a session ID for a user."""
+    if user_id not in user_sessions:
+        user_sessions[user_id] = str(uuid.uuid4())[:8]
+    return user_sessions[user_id]
+
+
+def new_session(user_id: str) -> str:
+    """Create a new session for a user."""
+    user_sessions[user_id] = str(uuid.uuid4())[:8]
+    return user_sessions[user_id]
+
+
+def log_event(event: str, user_id: str, **data) -> None:
+    """Log an event to the database."""
+    if storage and hasattr(storage, 'log_event'):
+        history = user_histories.get(user_id)
+        difficulty = history.difficulty if history else None
+        session_id = get_session_id(user_id)
+        storage.log_event(event, user_id, session_id, difficulty, **data)
+
 
 app = FastAPI(title="Tongue API", description="Spanish translation practice API")
 
@@ -290,6 +317,10 @@ async def create_user(user_id: str, request: CreateUserRequest):
     # Save the PIN
     storage.save_pin(user_id, request.pin)
 
+    # Log user creation and start new session
+    session_id = new_session(user_id)
+    log_event('user.create', user_id)
+
     return {"success": True, "user_id": user_id}
 
 
@@ -305,6 +336,8 @@ async def login_user(user_id: str, request: LoginRequest):
     if not existing_pin:
         # Legacy user without PIN - set their PIN now
         storage.save_pin(user_id, request.pin)
+        session_id = new_session(user_id)
+        log_event('user.login', user_id, is_legacy=True)
         return {"success": True, "user_id": user_id}
 
     # Verify PIN
@@ -313,6 +346,10 @@ async def login_user(user_id: str, request: LoginRequest):
             "success": False,
             "error": "User name already exists. Please enter the correct PIN or choose a different name to start a new game."
         }
+
+    # Start new session on successful login
+    session_id = new_session(user_id)
+    log_event('user.login', user_id)
 
     return {"success": True, "user_id": user_id}
 
@@ -348,6 +385,7 @@ async def get_story(user_id: str = "default", force_new: bool = False):
     if force_new or history.needs_new_story():
         # Try to use pre-generated story first
         pending = get_pending_story(user_id, history.difficulty)
+        from_cache = pending is not None
         if pending:
             story, ms = pending
         else:
@@ -359,6 +397,13 @@ async def get_story(user_id: str = "default", force_new: bool = False):
             )
         history.set_story(story, history.difficulty, ms)
         save_history(user_id)
+
+        # Log story generation
+        log_event('story.generate', user_id,
+                  from_cache=from_cache,
+                  ms=ms,
+                  sentence_count=len(history.story_sentences),
+                  model='gemini-2.5-pro')
 
         # Trigger background generation for next story
         trigger_background_story(user_id, history)
@@ -496,6 +541,7 @@ async def get_next_sentence(user_id: str = "default"):
             if history.needs_new_story():
                 # Try to use pre-generated story first
                 pending = get_pending_story(user_id, history.difficulty)
+                from_cache = pending is not None
                 if pending:
                     story, ms = pending
                 else:
@@ -507,6 +553,13 @@ async def get_next_sentence(user_id: str = "default"):
                     )
                 history.set_story(story, history.difficulty, ms)
                 save_history(user_id)
+
+                # Log story generation
+                log_event('story.generate', user_id,
+                          from_cache=from_cache,
+                          ms=ms,
+                          sentence_count=len(history.story_sentences),
+                          model='gemini-2.5-pro')
 
             # Get next sentence
             current_round, is_review = history.get_next_sentence()
@@ -545,6 +598,27 @@ async def get_next_sentence(user_id: str = "default"):
         sentence = parts[2] if len(parts) == 3 else sentence
     elif is_verb_challenge and sentence.startswith("VERB:"):
         sentence = sentence[5:]  # Remove prefix for display
+
+    # Log sentence or challenge served
+    if is_word_challenge:
+        log_event('challenge.served', user_id,
+                  challenge_type='word',
+                  word=sentence)
+    elif is_vocab_challenge:
+        log_event('challenge.served', user_id,
+                  challenge_type='vocab',
+                  word=sentence,
+                  category=vocab_challenge.get('category') if vocab_challenge else None)
+    elif is_verb_challenge:
+        log_event('challenge.served', user_id,
+                  challenge_type='verb',
+                  word=sentence,
+                  tense=verb_challenge.get('tense') if verb_challenge else None)
+    else:
+        log_event('sentence.served', user_id,
+                  sentence=sentence,
+                  is_review=is_review,
+                  sentences_remaining=len(history.story_sentences))
 
     return NextSentenceResponse(
         sentence=sentence,
@@ -765,6 +839,18 @@ async def submit_translation(request: TranslationRequest):
 
             save_history(request.user_id)
 
+            # Log translation submission and result for challenges
+            log_event('translation.submit', request.user_id,
+                      sentence=request.sentence,
+                      translation=request.translation,
+                      challenge_type=challenge_type,
+                      hint_used=request.hint_used)
+            log_event('translation.result', request.user_id,
+                      score=current_round.get_score(),
+                      challenge_type=challenge_type,
+                      correct_translation=judgement.get('correct_translation', ''),
+                      ms=judge_ms)
+
             return TranslationResponse(
                 score=current_round.get_score(),
                 correct_translation=judgement.get('correct_translation', ''),
@@ -779,6 +865,24 @@ async def submit_translation(request: TranslationRequest):
         # Regular sentences affect level progress
         level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words, request.hint_used)
         save_history(request.user_id)
+
+        # Log translation submission and result
+        log_event('translation.submit', request.user_id,
+                  sentence=request.sentence,
+                  translation=request.translation,
+                  hint_used=request.hint_used,
+                  hint_words=request.hint_words)
+        log_event('translation.result', request.user_id,
+                  score=current_round.get_score(),
+                  correct_translation=judgement.get('correct_translation', ''),
+                  ms=judge_ms)
+
+        # Log level change if it occurred
+        if level_info['level_changed']:
+            log_event('level.change', request.user_id,
+                      old_level=level_info['new_level'] - 1 if level_info['change_type'] == 'up' else level_info['new_level'] + 1,
+                      new_level=level_info['new_level'],
+                      direction=level_info['change_type'])
 
         return TranslationResponse(
             score=current_round.get_score(),
@@ -805,6 +909,20 @@ async def get_hint(request: HintRequest):
     history = get_history(request.user_id)
 
     hint = ai_provider.get_hint(request.sentence, history.correct_words)
+
+    # Log hint request
+    words_revealed = []
+    if hint:
+        if hint.get('noun'):
+            words_revealed.append(hint['noun'][0])
+        if hint.get('verb'):
+            words_revealed.append(hint['verb'][0])
+        if hint.get('adjective'):
+            words_revealed.append(hint['adjective'][0])
+    log_event('hint.request', request.user_id,
+              sentence=request.sentence,
+              words_revealed=words_revealed)
+
     if not hint:
         return HintResponse(noun=None, verb=None, adjective=None)
 
@@ -869,6 +987,32 @@ async def get_api_stats():
     }
 
     return merged
+
+
+@app.get("/api/events/stats")
+async def get_event_stats(user_id: str = None):
+    """Get aggregated event statistics."""
+    if not hasattr(storage, 'get_user_stats'):
+        return {"error": "Event logging not available with current storage"}
+
+    if user_id:
+        return storage.get_user_stats(user_id)
+    else:
+        return storage.get_global_stats()
+
+
+@app.get("/api/events/recent")
+async def get_recent_events(user_id: str, event_type: str = None, limit: int = 50):
+    """Get recent events for a user."""
+    if not hasattr(storage, 'get_user_events'):
+        return {"error": "Event logging not available with current storage"}
+
+    events = storage.get_user_events(user_id, event_type, limit)
+    # Convert datetime objects to strings for JSON serialization
+    for event in events:
+        if 'timestamp' in event and hasattr(event['timestamp'], 'isoformat'):
+            event['timestamp'] = event['timestamp'].isoformat()
+    return {"events": events}
 
 
 def create_app():

@@ -84,6 +84,30 @@ class PostgresStorage(Storage):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Events log table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS events (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    event VARCHAR(50) NOT NULL,
+                    user_id VARCHAR(255) NOT NULL,
+                    session_id VARCHAR(64),
+                    difficulty INTEGER,
+                    data JSONB
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_events_user_id ON events(user_id)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_events_event ON events(event)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)
+            """)
         self._conn.commit()
 
     def close(self):
@@ -293,3 +317,137 @@ class PostgresStorage(Storage):
             print(f"Error saving verb conjugation: {e}")
             self.conn.rollback()
             raise
+
+    # Event logging methods
+    def log_event(self, event: str, user_id: str, session_id: str = None,
+                  difficulty: int = None, **data) -> None:
+        """Log an event to the database."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO events (event, user_id, session_id, difficulty, data)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (event, user_id, session_id, difficulty, json.dumps(data) if data else None))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Error logging event: {e}")
+            self.conn.rollback()
+
+    def get_user_events(self, user_id: str, event_type: str = None,
+                        limit: int = 100) -> list[dict]:
+        """Get recent events for a user."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if event_type:
+                    cur.execute("""
+                        SELECT * FROM events
+                        WHERE user_id = %s AND event = %s
+                        ORDER BY timestamp DESC LIMIT %s
+                    """, (user_id, event_type, limit))
+                else:
+                    cur.execute("""
+                        SELECT * FROM events
+                        WHERE user_id = %s
+                        ORDER BY timestamp DESC LIMIT %s
+                    """, (user_id, limit))
+                return [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error getting user events: {e}")
+            return []
+
+    def get_user_stats(self, user_id: str) -> dict:
+        """Get aggregated stats for a user."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Total translations and average score
+                cur.execute("""
+                    SELECT
+                        COUNT(*) as total_translations,
+                        AVG((data->>'score')::float) as avg_score,
+                        COUNT(*) FILTER (WHERE (data->>'score')::int >= 80) as good_translations,
+                        COUNT(*) FILTER (WHERE (data->>'score')::int < 50) as poor_translations
+                    FROM events
+                    WHERE user_id = %s AND event = 'translation.result'
+                """, (user_id,))
+                translation_stats = dict(cur.fetchone())
+
+                # Hints used
+                cur.execute("""
+                    SELECT COUNT(*) as hints_used
+                    FROM events
+                    WHERE user_id = %s AND event = 'hint.request'
+                """, (user_id,))
+                hint_stats = dict(cur.fetchone())
+
+                # Stories generated
+                cur.execute("""
+                    SELECT
+                        COUNT(*) as stories_generated,
+                        COUNT(*) FILTER (WHERE (data->>'from_cache')::boolean = true) as from_cache
+                    FROM events
+                    WHERE user_id = %s AND event = 'story.generate'
+                """, (user_id,))
+                story_stats = dict(cur.fetchone())
+
+                # Level changes
+                cur.execute("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE data->>'direction' = 'up') as level_ups,
+                        COUNT(*) FILTER (WHERE data->>'direction' = 'down') as level_downs
+                    FROM events
+                    WHERE user_id = %s AND event = 'level.change'
+                """, (user_id,))
+                level_stats = dict(cur.fetchone())
+
+                # Sessions count
+                cur.execute("""
+                    SELECT COUNT(DISTINCT session_id) as sessions
+                    FROM events
+                    WHERE user_id = %s AND session_id IS NOT NULL
+                """, (user_id,))
+                session_stats = dict(cur.fetchone())
+
+                # Challenge stats
+                cur.execute("""
+                    SELECT
+                        data->>'challenge_type' as challenge_type,
+                        COUNT(*) as total,
+                        COUNT(*) FILTER (WHERE (data->>'score')::int >= 100) as correct
+                    FROM events
+                    WHERE user_id = %s AND event = 'translation.result'
+                        AND data->>'challenge_type' IS NOT NULL
+                    GROUP BY data->>'challenge_type'
+                """, (user_id,))
+                challenge_rows = cur.fetchall()
+                challenge_stats = {row['challenge_type']: {'total': row['total'], 'correct': row['correct']}
+                                   for row in challenge_rows}
+
+                return {
+                    **translation_stats,
+                    **hint_stats,
+                    **story_stats,
+                    **level_stats,
+                    **session_stats,
+                    'challenge_stats': challenge_stats
+                }
+        except Exception as e:
+            print(f"Error getting user stats: {e}")
+            return {}
+
+    def get_global_stats(self) -> dict:
+        """Get aggregated stats across all users."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT
+                        COUNT(DISTINCT user_id) as total_users,
+                        COUNT(*) FILTER (WHERE event = 'translation.result') as total_translations,
+                        COUNT(*) FILTER (WHERE event = 'story.generate') as total_stories,
+                        COUNT(*) FILTER (WHERE event = 'hint.request') as total_hints,
+                        COUNT(DISTINCT session_id) as total_sessions
+                    FROM events
+                """)
+                return dict(cur.fetchone())
+        except Exception as e:
+            print(f"Error getting global stats: {e}")
+            return {}
