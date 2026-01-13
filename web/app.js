@@ -117,9 +117,7 @@ const elements = {
     statsTotalTokens: document.getElementById('stats-total-tokens'),
     statsAvgMs: document.getElementById('stats-avg-ms'),
     statsDetails: document.getElementById('stats-details'),
-    statStory: document.getElementById('stat-story'),
-    statTranslate: document.getElementById('stat-translate'),
-    statHint: document.getElementById('stat-hint')
+    statsTableBody: document.getElementById('stats-table-body')
 };
 
 // API Functions
@@ -209,13 +207,30 @@ async function updateApiStats() {
             elements.statsTotalTokens.textContent = `${stats.total.total_tokens.toLocaleString()} tokens`;
             elements.statsAvgMs.textContent = `${stats.total.avg_ms}ms avg`;
 
-            // Format detail stats
-            const formatStat = (s) => s.calls > 0
-                ? `${s.calls} calls, ${s.total_tokens.toLocaleString()} tokens, ${s.avg_ms}ms avg`
-                : '0 calls';
-            elements.statStory.textContent = formatStat(stats.story);
-            elements.statTranslate.textContent = formatStat(stats.translate);
-            elements.statHint.textContent = formatStat(stats.hint);
+            // Populate stats table
+            const callTypes = ['story', 'validate', 'hint', 'word_translation', 'verb_analysis'];
+            const callLabels = {
+                'story': 'Story',
+                'validate': 'Validate',
+                'hint': 'Hint',
+                'word_translation': 'Word Translation',
+                'verb_analysis': 'Verb Analysis'
+            };
+
+            elements.statsTableBody.innerHTML = '';
+            for (const callType of callTypes) {
+                const s = stats[callType];
+                if (s && s.calls > 0) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${callLabels[callType]}</td>
+                        <td>${s.calls}</td>
+                        <td>${s.avg_tokens}</td>
+                        <td>${s.avg_ms}</td>
+                    `;
+                    elements.statsTableBody.appendChild(row);
+                }
+            }
         }
     } catch (e) {
         console.error('Failed to fetch API stats:', e);

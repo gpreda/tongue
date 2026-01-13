@@ -28,18 +28,21 @@ class GeminiProvider(AIProvider):
         # Stats tracking per call type
         self.stats = {
             'story': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
-            'translate': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
-            'hint': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
+            'validate': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+            'hint': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+            'word_translation': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+            'verb_analysis': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
         }
 
     def _record_stats(self, call_type: str, ms: int, token_stats: dict) -> None:
         """Record stats for a call type."""
-        if call_type in self.stats:
-            self.stats[call_type]['calls'] += 1
-            self.stats[call_type]['total_ms'] += ms
-            self.stats[call_type]['prompt_tokens'] += token_stats.get('prompt_tokens', 0)
-            self.stats[call_type]['completion_tokens'] += token_stats.get('completion_tokens', 0)
-            self.stats[call_type]['total_tokens'] += token_stats.get('total_tokens', 0)
+        if call_type not in self.stats:
+            self.stats[call_type] = {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
+        self.stats[call_type]['calls'] += 1
+        self.stats[call_type]['total_ms'] += ms
+        self.stats[call_type]['prompt_tokens'] += token_stats.get('prompt_tokens', 0)
+        self.stats[call_type]['completion_tokens'] += token_stats.get('completion_tokens', 0)
+        self.stats[call_type]['total_tokens'] += token_stats.get('total_tokens', 0)
 
     def get_stats(self) -> dict:
         """Get current stats with computed averages."""
@@ -185,7 +188,7 @@ class GeminiProvider(AIProvider):
             Return ONLY the dictionary, no other text, no markdown formatting.
         """
         response, ms, token_stats = self._execute_chat(prompt)
-        self._record_stats('translate', ms, token_stats)
+        self._record_stats('validate', ms, token_stats)
         sanitized = self._sanitize_judgement(response)
 
         try:
@@ -316,7 +319,7 @@ class GeminiProvider(AIProvider):
             Return ONLY the dictionary, no other text.
         """
         response, ms, token_stats = self._execute_chat(prompt)
-        self._record_stats('translate', ms, token_stats)  # Count under translate stats
+        self._record_stats('word_translation', ms, token_stats)
         raw_response = response
         try:
             response = response.strip()
@@ -370,7 +373,7 @@ class GeminiProvider(AIProvider):
             Return ONLY the dictionary, no other text.
         """
         response, ms, token_stats = self._execute_chat(prompt)
-        self._record_stats('translate', ms, token_stats)
+        self._record_stats('verb_analysis', ms, token_stats)
         raw_response = response
         try:
             response = response.strip()

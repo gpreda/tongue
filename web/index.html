@@ -192,18 +192,17 @@
                 <span id="stats-avg-ms">0ms avg</span>
             </div>
             <div class="stats-details hidden" id="stats-details">
-                <div class="stat-row">
-                    <span class="stat-label">Story:</span>
-                    <span id="stat-story"></span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Translate:</span>
-                    <span id="stat-translate"></span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Hint:</span>
-                    <span id="stat-hint"></span>
-                </div>
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Call</th>
+                            <th># Calls</th>
+                            <th>Avg Tokens</th>
+                            <th>Avg ms</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stats-table-body"></tbody>
+                </table>
             </div>
         </div>
     </div>
