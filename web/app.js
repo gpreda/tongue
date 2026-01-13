@@ -210,11 +210,11 @@ async function updateApiStats() {
             // Populate stats table
             const callTypes = ['story', 'validate', 'hint', 'word_translation', 'verb_analysis'];
             const callLabels = {
-                'story': 'Story',
-                'validate': 'Validate',
-                'hint': 'Hint',
-                'word_translation': 'Word Translation',
-                'verb_analysis': 'Verb Analysis'
+                'story': 'Story (Pro)',
+                'validate': 'Validate (Flash)',
+                'hint': 'Hint (Flash)',
+                'word_translation': 'Word (Flash)',
+                'verb_analysis': 'Verb (Flash)'
             };
 
             elements.statsTableBody.innerHTML = '';

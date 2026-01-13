@@ -1,5 +1,7 @@
 """FastAPI server for tongue application."""
 
+import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -8,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from core.models import History, TongueRound
 from core.config import (
@@ -114,8 +118,13 @@ VALID_TENSES = ['present', 'preterite', 'imperfect', 'future', 'conditional', 's
 
 # Global state (in production, use proper DI)
 storage: FileStorage = None
-ai_provider: GeminiProvider = None
+ai_provider: GeminiProvider = None  # Fast model for validation/hints
+story_provider: GeminiProvider = None  # Pro model for story generation
 user_histories: dict[str, History] = {}
+
+# Background story generation
+pending_stories: dict[str, dict] = {}  # user_id -> {story, difficulty, ms, task}
+story_generation_locks: dict[str, asyncio.Lock] = {}  # Prevent duplicate generations
 
 app = FastAPI(title="Tongue API", description="Spanish translation practice API")
 
@@ -146,10 +155,68 @@ def save_history(user_id: str = "default") -> None:
         storage.save_state(user_histories[user_id].to_dict(), user_id)
 
 
+async def generate_story_background(user_id: str, correct_words: list, difficulty: int) -> None:
+    """Generate a story in the background for a user."""
+    # Get or create lock for this user
+    if user_id not in story_generation_locks:
+        story_generation_locks[user_id] = asyncio.Lock()
+
+    async with story_generation_locks[user_id]:
+        # Check if we already have a pending story at this difficulty
+        if user_id in pending_stories:
+            pending = pending_stories[user_id]
+            if pending.get('difficulty') == difficulty and pending.get('story'):
+                logger.info(f"Story already pre-generated for {user_id} at difficulty {difficulty}")
+                return
+
+        logger.info(f"Background generating story for {user_id} at difficulty {difficulty}")
+        try:
+            # Run in executor to not block the event loop
+            loop = asyncio.get_event_loop()
+            story, ms = await loop.run_in_executor(
+                None,
+                lambda: story_provider.generate_story(correct_words, difficulty)
+            )
+            pending_stories[user_id] = {
+                'story': story,
+                'difficulty': difficulty,
+                'ms': ms
+            }
+            logger.info(f"Background story ready for {user_id}: {len(story)} chars, {ms}ms")
+        except Exception as e:
+            logger.error(f"Background story generation failed for {user_id}: {e}")
+            # Clear any partial state
+            pending_stories.pop(user_id, None)
+
+
+def get_pending_story(user_id: str, difficulty: int) -> tuple[str, int] | None:
+    """Get a pre-generated story if available and at the right difficulty."""
+    if user_id in pending_stories:
+        pending = pending_stories[user_id]
+        if pending.get('difficulty') == difficulty and pending.get('story'):
+            story = pending['story']
+            ms = pending['ms']
+            # Clear the pending story
+            del pending_stories[user_id]
+            logger.info(f"Using pre-generated story for {user_id}")
+            return (story, ms)
+    return None
+
+
+def trigger_background_story(user_id: str, history: History) -> None:
+    """Trigger background story generation for a user."""
+    # Only trigger if user might need a new story soon
+    # (less than 3 sentences remaining or no story)
+    if len(history.story_sentences) < 3 or history.needs_new_story():
+        asyncio.create_task(
+            generate_story_background(user_id, history.correct_words, history.difficulty)
+        )
+
+
 @app.on_event("startup")
 async def startup():
-    """Initialize storage and AI provider on startup."""
-    global storage, ai_provider
+    """Initialize storage and AI providers on startup."""
+    global storage, ai_provider, story_provider
 
     # Use PostgreSQL by default, set TONGUE_STORAGE=file to use file storage
     storage_type = os.environ.get('TONGUE_STORAGE', 'postgres')
@@ -175,7 +242,11 @@ async def startup():
             "Set GEMINI_API_KEY or create ~/.config/tongue/config.json"
         )
 
-    ai_provider = GeminiProvider(api_key)
+    # Fast model for validation, hints, word/verb analysis
+    ai_provider = GeminiProvider(api_key, model_name='gemini-2.0-flash')
+    # Pro model for higher quality story generation
+    story_provider = GeminiProvider(api_key, model_name='gemini-2.5-pro')
+    print("AI providers initialized: gemini-2.0-flash (validation), gemini-2.5-pro (stories)")
 
 
 @app.get("/")
@@ -275,12 +346,22 @@ async def get_story(user_id: str = "default", force_new: bool = False):
     history = get_history(user_id)
 
     if force_new or history.needs_new_story():
-        story, ms = ai_provider.generate_story(
-            history.correct_words,
-            history.difficulty
-        )
+        # Try to use pre-generated story first
+        pending = get_pending_story(user_id, history.difficulty)
+        if pending:
+            story, ms = pending
+        else:
+            # Fall back to synchronous generation with story_provider (pro model)
+            loop = asyncio.get_event_loop()
+            story, ms = await loop.run_in_executor(
+                None,
+                lambda: story_provider.generate_story(history.correct_words, history.difficulty)
+            )
         history.set_story(story, history.difficulty, ms)
         save_history(user_id)
+
+        # Trigger background generation for next story
+        trigger_background_story(user_id, history)
 
     current_sentence = None
     if history.story_sentences:
@@ -413,10 +494,17 @@ async def get_next_sentence(user_id: str = "default"):
         if current_round is None:
             # Generate story if needed
             if history.needs_new_story():
-                story, ms = ai_provider.generate_story(
-                    history.correct_words,
-                    history.difficulty
-                )
+                # Try to use pre-generated story first
+                pending = get_pending_story(user_id, history.difficulty)
+                if pending:
+                    story, ms = pending
+                else:
+                    # Fall back to synchronous generation with story_provider (pro model)
+                    loop = asyncio.get_event_loop()
+                    story, ms = await loop.run_in_executor(
+                        None,
+                        lambda: story_provider.generate_story(history.correct_words, history.difficulty)
+                    )
                 history.set_story(story, history.difficulty, ms)
                 save_history(user_id)
 
@@ -425,6 +513,9 @@ async def get_next_sentence(user_id: str = "default"):
             if not current_round:
                 raise HTTPException(status_code=500, detail="No sentences available")
             save_history(user_id)
+
+            # Trigger background generation if running low on sentences
+            trigger_background_story(user_id, history)
 
     round = current_round
 
@@ -750,8 +841,34 @@ async def get_mastered_words(user_id: str = "default"):
 
 @app.get("/api/stats")
 async def get_api_stats():
-    """Get Gemini API usage statistics."""
-    return ai_provider.get_stats()
+    """Get Gemini API usage statistics from both providers."""
+    # Get stats from both providers
+    flash_stats = ai_provider.get_stats()
+    pro_stats = story_provider.get_stats()
+
+    # Merge stats - flash has validate/hint/word_translation/verb_analysis, pro has story
+    merged = {}
+    for key, value in flash_stats.items():
+        if key != 'total':
+            merged[key] = value
+    for key, value in pro_stats.items():
+        if key != 'total':
+            merged[key] = value
+
+    # Recalculate totals
+    totals = {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
+    for key, stats in merged.items():
+        for tkey in totals:
+            totals[tkey] += stats.get(tkey, 0)
+
+    calls = totals['calls']
+    merged['total'] = {
+        **totals,
+        'avg_ms': round(totals['total_ms'] / calls, 1) if calls > 0 else 0,
+        'avg_tokens': round(totals['total_tokens'] / calls, 1) if calls > 0 else 0
+    }
+
+    return merged
 
 
 def create_app():
