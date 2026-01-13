@@ -584,14 +584,30 @@ async def get_next_sentence(user_id: str = "default"):
     previous_eval = None
     if has_previous and history.last_evaluated_round:
         prev = history.last_evaluated_round
+        prev_sentence = prev.sentence
+
+        # Determine challenge type and clean up sentence for display
+        prev_challenge_type = None
+        if prev_sentence.startswith("WORD:"):
+            prev_challenge_type = 'word'
+            prev_sentence = prev_sentence[5:]  # Remove WORD: prefix
+        elif prev_sentence.startswith("VOCAB:"):
+            prev_challenge_type = 'vocab'
+            parts = prev_sentence.split(":", 2)
+            prev_sentence = parts[2] if len(parts) == 3 else prev_sentence
+        elif prev_sentence.startswith("VERB:"):
+            prev_challenge_type = 'verb'
+            prev_sentence = prev_sentence[5:]  # Remove VERB: prefix
+
         previous_eval = {
-            'sentence': prev.sentence,
+            'sentence': prev_sentence,
             'translation': prev.translation,
             'score': prev.get_score(),
             'correct_translation': prev.judgement.get('correct_translation') if prev.judgement else None,
             'evaluation': prev.judgement.get('evaluation') if prev.judgement else None,
             'judge_ms': prev.judge_ms,
-            'level_changed': history.last_level_changed
+            'level_changed': history.last_level_changed,
+            'challenge_type': prev_challenge_type
         }
         history.last_evaluated_round = None
 
@@ -843,6 +859,10 @@ async def submit_translation(request: TranslationRequest):
             # For word challenges, also update word tracking for learning
             if is_word_challenge:
                 history.update_words(current_round, request.hint_words or [])
+
+            # Store the evaluated round so it shows on next page
+            history.last_evaluated_round = current_round
+            history.last_level_changed = False
 
             save_history(request.user_id)
 

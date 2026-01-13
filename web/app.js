@@ -61,6 +61,8 @@ const elements = {
     storyContent: document.getElementById('story-content'),
 
     previousEval: document.getElementById('previous-eval'),
+    prevChallengeType: document.getElementById('prev-challenge-type'),
+    prevSentenceLabel: document.getElementById('prev-sentence-label'),
     prevSentence: document.getElementById('prev-sentence'),
     prevTranslation: document.getElementById('prev-translation'),
     prevCorrect: document.getElementById('prev-correct'),
@@ -284,10 +286,36 @@ function showPreviousEvaluation(eval_data) {
     }
 
     elements.previousEval.classList.remove('hidden');
+
+    // Show challenge type indicator if it was a challenge
+    if (eval_data.challenge_type) {
+        const challengeLabels = {
+            'word': 'Word Challenge',
+            'vocab': 'Vocabulary Quiz',
+            'verb': 'Verb Challenge'
+        };
+        elements.prevChallengeType.textContent = challengeLabels[eval_data.challenge_type] || '';
+        elements.prevChallengeType.classList.remove('hidden');
+        elements.prevSentenceLabel.textContent = 'Word:';
+    } else {
+        elements.prevChallengeType.classList.add('hidden');
+        elements.prevSentenceLabel.textContent = 'Sentence:';
+    }
+
     elements.prevSentence.textContent = eval_data.sentence;
     elements.prevTranslation.textContent = eval_data.translation;
     elements.prevCorrect.textContent = eval_data.correct_translation;
     elements.prevScore.textContent = eval_data.score;
+
+    // Apply score styling
+    elements.prevScore.className = '';
+    if (eval_data.score >= 90) {
+        elements.prevScore.classList.add('score-excellent');
+    } else if (eval_data.score >= 70) {
+        elements.prevScore.classList.add('score-good');
+    } else {
+        elements.prevScore.classList.add('score-poor');
+    }
 
     if (eval_data.evaluation && eval_data.score < 100) {
         elements.prevReasonRow.classList.remove('hidden');

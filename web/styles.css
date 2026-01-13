@@ -270,6 +270,36 @@ header h1 {
     margin-bottom: 8px;
 }
 
+.prev-challenge-badge {
+    display: inline-block;
+    background: rgba(155, 89, 182, 0.2);
+    color: #9b59b6;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+/* Score colors for previous evaluation */
+.score-excellent {
+    color: #2ecc71;
+    font-weight: bold;
+}
+
+.score-good {
+    color: #3498db;
+    font-weight: bold;
+}
+
+.score-poor {
+    color: #e74c3c;
+    font-weight: bold;
+}
+
 /* Task Section */
 .task-section {
     background: rgba(255, 255, 255, 0.05);
