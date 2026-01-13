@@ -255,9 +255,14 @@ class History:
         # Check for due review sentences first
         for i, review in enumerate(self.review_queue):
             if review['due_at_round'] <= self.total_completed:
+                sentence = review['sentence']
+                # Skip challenge items that shouldn't be in review queue
+                if sentence.startswith('WORD:') or sentence.startswith('VOCAB:') or sentence.startswith('VERB:'):
+                    self.review_queue.pop(i)
+                    continue
                 # Remove from queue and return this sentence
                 self.review_queue.pop(i)
-                round = TongueRound(review['sentence'], review['difficulty'], 0)
+                round = TongueRound(sentence, review['difficulty'], 0)
                 self.rounds.append(round)
                 return (round, True)
 
@@ -332,7 +337,11 @@ class History:
         self.total_completed += 1
 
         # Add low-score sentences to review queue (bring back after 5 rounds)
-        if score <= 50:
+        # Don't add challenges (WORD:, VOCAB:, VERB:) to review queue
+        is_challenge = (round.sentence.startswith('WORD:') or
+                        round.sentence.startswith('VOCAB:') or
+                        round.sentence.startswith('VERB:'))
+        if score <= 50 and not is_challenge:
             # Check if sentence is not already in review queue
             existing = [r['sentence'] for r in self.review_queue]
             if round.sentence not in existing:

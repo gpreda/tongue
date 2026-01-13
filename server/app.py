@@ -447,8 +447,6 @@ async def get_next_sentence(user_id: str = "default"):
         last_round = history.rounds[-1]
         if not last_round.evaluated:
             current_round = last_round
-            # Check if this was a review sentence (generate_ms=0 indicates review)
-            is_review = last_round.generate_ms == 0
             # Check if this was a word challenge (sentence starts with "WORD:")
             if last_round.sentence.startswith("WORD:"):
                 is_word_challenge = True
@@ -488,6 +486,9 @@ async def get_next_sentence(user_id: str = "default"):
                         'conjugated_form': conjugated_form,
                         **stored
                     }
+            else:
+                # Not a challenge - check if it's a review sentence (generate_ms=0)
+                is_review = last_round.generate_ms == 0
 
     # Only get a new sentence/challenge if there's no current unevaluated round
     if current_round is None:
