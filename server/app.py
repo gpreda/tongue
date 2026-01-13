@@ -276,9 +276,9 @@ async def startup():
         )
 
     # Fast model for validation, hints, word/verb analysis
-    ai_provider = GeminiProvider(api_key, model_name='gemini-2.0-flash')
+    ai_provider = GeminiProvider(api_key, model_name='gemini-2.0-flash', storage=storage)
     # Pro model for higher quality story generation
-    story_provider = GeminiProvider(api_key, model_name='gemini-2.5-pro')
+    story_provider = GeminiProvider(api_key, model_name='gemini-2.5-pro', storage=storage)
     print("AI providers initialized: gemini-2.0-flash (validation), gemini-2.5-pro (stories)")
 
 

@@ -221,3 +221,43 @@ class FileStorage(Storage):
         except Exception as e:
             print(f"Error saving verb conjugation: {e}")
             raise
+
+    def _get_api_stats_file(self) -> str:
+        """Get the path to the API stats file."""
+        return os.path.join(self.state_dir, 'tongue_api_stats.json')
+
+    def _load_all_api_stats(self) -> dict:
+        """Load all API stats."""
+        stats_file = self._get_api_stats_file()
+        if os.path.exists(stats_file):
+            try:
+                with open(stats_file, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def _save_all_api_stats(self, all_stats: dict) -> None:
+        """Save all API stats."""
+        stats_file = self._get_api_stats_file()
+        with open(stats_file, 'w') as f:
+            json.dump(all_stats, f, indent=2)
+
+    def load_api_stats(self, provider_name: str) -> dict | None:
+        """Load API usage stats for a provider."""
+        try:
+            all_stats = self._load_all_api_stats()
+            return all_stats.get(provider_name)
+        except Exception as e:
+            print(f"Error loading API stats: {e}")
+            return None
+
+    def save_api_stats(self, provider_name: str, stats: dict) -> None:
+        """Save API usage stats for a provider."""
+        try:
+            all_stats = self._load_all_api_stats()
+            all_stats[provider_name] = stats
+            self._save_all_api_stats(all_stats)
+        except Exception as e:
+            print(f"Error saving API stats: {e}")
+            raise

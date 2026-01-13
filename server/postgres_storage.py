@@ -108,6 +108,14 @@ class PostgresStorage(Storage):
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)
             """)
+            # API stats table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS api_stats (
+                    provider_name VARCHAR(100) PRIMARY KEY,
+                    stats JSONB NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         self._conn.commit()
 
     def close(self):
@@ -451,3 +459,34 @@ class PostgresStorage(Storage):
         except Exception as e:
             print(f"Error getting global stats: {e}")
             return {}
+
+    def load_api_stats(self, provider_name: str) -> dict | None:
+        """Load API usage stats for a provider."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT stats FROM api_stats WHERE provider_name = %s",
+                    (provider_name,)
+                )
+                row = cur.fetchone()
+                if row:
+                    return row['stats']
+                return None
+        except Exception as e:
+            print(f"Error loading API stats: {e}")
+            return None
+
+    def save_api_stats(self, provider_name: str, stats: dict) -> None:
+        """Save API usage stats for a provider."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO api_stats (provider_name, stats, updated_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (provider_name)
+                    DO UPDATE SET stats = EXCLUDED.stats, updated_at = CURRENT_TIMESTAMP
+                """, (provider_name, json.dumps(stats)))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Error saving API stats: {e}")
+            self.conn.rollback()

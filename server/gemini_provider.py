@@ -20,13 +20,16 @@ SEASONS = ["spring", "summer", "autumn", "winter"]
 class GeminiProvider(AIProvider):
     """Gemini AI provider implementation."""
 
-    def __init__(self, api_key: str, model_name: str = 'gemini-2.0-flash'):
+    def __init__(self, api_key: str, model_name: str = 'gemini-2.0-flash', storage=None):
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel(model_name)
         self.chat = self.model.start_chat(history=[])
         self.model_name = model_name
-        # Stats tracking per call type
-        self.stats = {
+        self.storage = storage
+        self.provider_name = f"gemini_{model_name.replace('-', '_').replace('.', '_')}"
+
+        # Default stats structure
+        default_stats = {
             'story': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
             'validate': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
             'hint': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
@@ -34,8 +37,22 @@ class GeminiProvider(AIProvider):
             'verb_analysis': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
         }
 
+        # Load stats from storage or use defaults
+        if storage:
+            loaded_stats = storage.load_api_stats(self.provider_name)
+            if loaded_stats:
+                # Merge loaded stats with defaults to handle new call types
+                self.stats = default_stats
+                for key in loaded_stats:
+                    if key in self.stats:
+                        self.stats[key] = loaded_stats[key]
+            else:
+                self.stats = default_stats
+        else:
+            self.stats = default_stats
+
     def _record_stats(self, call_type: str, ms: int, token_stats: dict) -> None:
-        """Record stats for a call type."""
+        """Record stats for a call type and persist to storage."""
         if call_type not in self.stats:
             self.stats[call_type] = {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
         self.stats[call_type]['calls'] += 1
@@ -43,6 +60,13 @@ class GeminiProvider(AIProvider):
         self.stats[call_type]['prompt_tokens'] += token_stats.get('prompt_tokens', 0)
         self.stats[call_type]['completion_tokens'] += token_stats.get('completion_tokens', 0)
         self.stats[call_type]['total_tokens'] += token_stats.get('total_tokens', 0)
+
+        # Persist to storage
+        if self.storage:
+            try:
+                self.storage.save_api_stats(self.provider_name, self.stats)
+            except Exception as e:
+                logger.warning(f"Failed to persist API stats: {e}")
 
     def get_stats(self) -> dict:
         """Get current stats with computed averages."""

@@ -76,6 +76,10 @@ class MockStorage(Storage):
         self.config = {'gemini_api_key': 'test-api-key'}
         self.state = None
         self.save_calls = []
+        self.pins = {}
+        self.word_translations = {}
+        self.verb_conjugations = {}
+        self.api_stats = {}
 
     def set_config(self, config: dict):
         self.config = config
@@ -92,6 +96,38 @@ class MockStorage(Storage):
     def save_state(self, state: dict, user_id: str = "default") -> None:
         self.save_calls.append(state.copy())
         self.state = state
+
+    def save_pin(self, user_id: str, pin: str) -> bool:
+        self.pins[user_id] = pin
+        return True
+
+    def verify_pin(self, user_id: str, pin: str) -> bool:
+        return self.pins.get(user_id) == pin
+
+    def get_pin_hash(self, user_id: str) -> str | None:
+        return self.pins.get(user_id)
+
+    def get_word_translation(self, word: str) -> dict | None:
+        return self.word_translations.get(word)
+
+    def save_word_translation(self, word: str, translation: str, word_type: str) -> None:
+        self.word_translations[word] = {'translation': translation, 'type': word_type}
+
+    def get_verb_conjugation(self, conjugated_form: str) -> dict | None:
+        return self.verb_conjugations.get(conjugated_form)
+
+    def save_verb_conjugation(self, conjugated_form: str, base_verb: str, tense: str,
+                              translation: str, person: str) -> None:
+        self.verb_conjugations[conjugated_form] = {
+            'base_verb': base_verb, 'tense': tense,
+            'translation': translation, 'person': person
+        }
+
+    def load_api_stats(self, provider_name: str) -> dict | None:
+        return self.api_stats.get(provider_name)
+
+    def save_api_stats(self, provider_name: str, stats: dict) -> None:
+        self.api_stats[provider_name] = stats
 
 
 # ============================================================================

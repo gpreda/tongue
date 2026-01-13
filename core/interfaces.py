@@ -76,3 +76,13 @@ class Storage(ABC):
                               translation: str, person: str) -> None:
         """Save conjugation info for a verb form."""
         pass
+
+    @abstractmethod
+    def load_api_stats(self, provider_name: str) -> dict | None:
+        """Load API usage stats for a provider. Returns stats dict or None."""
+        pass
+
+    @abstractmethod
+    def save_api_stats(self, provider_name: str, stats: dict) -> None:
+        """Save API usage stats for a provider."""
+        pass
