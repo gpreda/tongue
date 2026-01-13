@@ -165,6 +165,12 @@ async def serve_app():
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/logs")
+async def serve_logs():
+    """Serve the event logs page."""
+    return FileResponse(WEB_DIR / "logs.html")
+
+
 def get_history(user_id: str = "default") -> History:
     """Get or create history for a user."""
     if user_id not in user_histories:

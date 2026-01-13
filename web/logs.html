@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tongue - Event Logs</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .logs-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .logs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .logs-header h1 {
+            margin: 0;
+        }
+
+        .logs-filters {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .logs-filters select,
+        .logs-filters input {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #333;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-size: 0.9rem;
+        }
+
+        .logs-filters button {
+            padding: 8px 16px;
+        }
+
+        .logs-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .logs-table th,
+        .logs-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .logs-table th {
+            background: rgba(255, 255, 255, 0.05);
+            color: #8892b0;
+            font-weight: 500;
+            position: sticky;
+            top: 0;
+        }
+
+        .logs-table tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .logs-table td.timestamp {
+            white-space: nowrap;
+            color: #6c757d;
+            font-family: monospace;
+        }
+
+        .logs-table td.event {
+            font-weight: 500;
+        }
+
+        .logs-table td.user {
+            color: #64b5f6;
+        }
+
+        .logs-table td.data {
+            font-family: monospace;
+            font-size: 0.8rem;
+            max-width: 400px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .logs-table td.data:hover {
+            white-space: normal;
+            word-break: break-all;
+        }
+
+        .event-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .event-user { background: #2196f3; color: white; }
+        .event-story { background: #9c27b0; color: white; }
+        .event-sentence { background: #4caf50; color: white; }
+        .event-challenge { background: #ff9800; color: white; }
+        .event-translation { background: #00bcd4; color: white; }
+        .event-hint { background: #e91e63; color: white; }
+        .event-level { background: #ffeb3b; color: black; }
+
+        .back-link {
+            color: #64b5f6;
+            text-decoration: none;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .stats-summary {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px 20px;
+            border-radius: 8px;
+            min-width: 120px;
+        }
+
+        .stat-card .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #64b5f6;
+        }
+
+        .stat-card .stat-label {
+            font-size: 0.8rem;
+            color: #8892b0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #8892b0;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="logs-container">
+        <div class="logs-header">
+            <div>
+                <h1>Event Logs</h1>
+                <a href="/app" class="back-link">Back to App</a>
+            </div>
+            <div class="logs-filters">
+                <select id="user-filter">
+                    <option value="">All Users</option>
+                </select>
+                <select id="event-filter">
+                    <option value="">All Events</option>
+                    <option value="user.login">user.login</option>
+                    <option value="user.create">user.create</option>
+                    <option value="story.generate">story.generate</option>
+                    <option value="sentence.served">sentence.served</option>
+                    <option value="challenge.served">challenge.served</option>
+                    <option value="translation.submit">translation.submit</option>
+                    <option value="translation.result">translation.result</option>
+                    <option value="hint.request">hint.request</option>
+                    <option value="level.change">level.change</option>
+                </select>
+                <button id="refresh-btn" class="btn-primary">Refresh</button>
+            </div>
+        </div>
+
+        <div id="stats-summary" class="stats-summary"></div>
+
+        <div id="logs-content">
+            <div class="loading">Loading logs...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        async function fetchUsers() {
+            try {
+                const response = await fetch(`${API_BASE}/api/users`);
+                const data = await response.json();
+                const select = document.getElementById('user-filter');
+                data.users.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user;
+                    option.textContent = user;
+                    select.appendChild(option);
+                });
+            } catch (e) {
+                console.error('Failed to fetch users:', e);
+            }
+        }
+
+        async function fetchStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/events/stats`);
+                const stats = await response.json();
+
+                const container = document.getElementById('stats-summary');
+                container.innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.total_users || 0}</div>
+                        <div class="stat-label">Users</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.total_translations || 0}</div>
+                        <div class="stat-label">Translations</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.total_stories || 0}</div>
+                        <div class="stat-label">Stories</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.total_hints || 0}</div>
+                        <div class="stat-label">Hints</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.total_sessions || 0}</div>
+                        <div class="stat-label">Sessions</div>
+                    </div>
+                `;
+            } catch (e) {
+                console.error('Failed to fetch stats:', e);
+            }
+        }
+
+        function getEventBadgeClass(event) {
+            if (event.startsWith('user.')) return 'event-user';
+            if (event.startsWith('story.')) return 'event-story';
+            if (event.startsWith('sentence.')) return 'event-sentence';
+            if (event.startsWith('challenge.')) return 'event-challenge';
+            if (event.startsWith('translation.')) return 'event-translation';
+            if (event.startsWith('hint.')) return 'event-hint';
+            if (event.startsWith('level.')) return 'event-level';
+            return '';
+        }
+
+        function formatTimestamp(ts) {
+            const date = new Date(ts);
+            return date.toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function formatData(data) {
+            if (!data) return '-';
+            // Show key info based on event type
+            const parts = [];
+            if (data.score !== undefined) parts.push(`score: ${data.score}`);
+            if (data.sentence) parts.push(`"${data.sentence.substring(0, 30)}..."`);
+            if (data.translation) parts.push(`-> "${data.translation.substring(0, 20)}..."`);
+            if (data.challenge_type) parts.push(`type: ${data.challenge_type}`);
+            if (data.from_cache !== undefined) parts.push(`cached: ${data.from_cache}`);
+            if (data.ms !== undefined) parts.push(`${data.ms}ms`);
+            if (data.direction) parts.push(`${data.direction} to L${data.new_level}`);
+            if (data.words_revealed) parts.push(`words: ${data.words_revealed.join(', ')}`);
+
+            return parts.length > 0 ? parts.join(' | ') : JSON.stringify(data);
+        }
+
+        async function fetchLogs() {
+            const userFilter = document.getElementById('user-filter').value;
+            const eventFilter = document.getElementById('event-filter').value;
+            const container = document.getElementById('logs-content');
+
+            if (!userFilter) {
+                // Need to fetch logs for all users - get list first
+                container.innerHTML = '<div class="loading">Loading logs...</div>';
+
+                try {
+                    const usersResponse = await fetch(`${API_BASE}/api/users`);
+                    const usersData = await usersResponse.json();
+
+                    // Fetch logs for each user and combine
+                    let allEvents = [];
+                    for (const user of usersData.users) {
+                        const url = eventFilter
+                            ? `${API_BASE}/api/events/recent?user_id=${encodeURIComponent(user)}&event_type=${eventFilter}&limit=100`
+                            : `${API_BASE}/api/events/recent?user_id=${encodeURIComponent(user)}&limit=100`;
+                        const response = await fetch(url);
+                        const data = await response.json();
+                        if (data.events) {
+                            allEvents = allEvents.concat(data.events);
+                        }
+                    }
+
+                    // Sort by timestamp descending and take top 100
+                    allEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    allEvents = allEvents.slice(0, 100);
+
+                    renderLogs(allEvents);
+                } catch (e) {
+                    console.error('Failed to fetch logs:', e);
+                    container.innerHTML = '<div class="no-data">Failed to load logs</div>';
+                }
+            } else {
+                container.innerHTML = '<div class="loading">Loading logs...</div>';
+
+                try {
+                    const url = eventFilter
+                        ? `${API_BASE}/api/events/recent?user_id=${encodeURIComponent(userFilter)}&event_type=${eventFilter}&limit=100`
+                        : `${API_BASE}/api/events/recent?user_id=${encodeURIComponent(userFilter)}&limit=100`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+
+                    renderLogs(data.events || []);
+                } catch (e) {
+                    console.error('Failed to fetch logs:', e);
+                    container.innerHTML = '<div class="no-data">Failed to load logs</div>';
+                }
+            }
+        }
+
+        function renderLogs(events) {
+            const container = document.getElementById('logs-content');
+
+            if (!events || events.length === 0) {
+                container.innerHTML = '<div class="no-data">No events found</div>';
+                return;
+            }
+
+            let html = `
+                <table class="logs-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Event</th>
+                            <th>User</th>
+                            <th>Level</th>
+                            <th>Session</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            for (const event of events) {
+                const badgeClass = getEventBadgeClass(event.event);
+                html += `
+                    <tr>
+                        <td class="timestamp">${formatTimestamp(event.timestamp)}</td>
+                        <td class="event"><span class="event-badge ${badgeClass}">${event.event}</span></td>
+                        <td class="user">${event.user_id}</td>
+                        <td>${event.difficulty || '-'}</td>
+                        <td>${event.session_id || '-'}</td>
+                        <td class="data" title="${event.data ? JSON.stringify(event.data) : ''}">${formatData(event.data)}</td>
+                    </tr>
+                `;
+            }
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        // Event listeners
+        document.getElementById('refresh-btn').addEventListener('click', () => {
+            fetchStats();
+            fetchLogs();
+        });
+
+        document.getElementById('user-filter').addEventListener('change', fetchLogs);
+        document.getElementById('event-filter').addEventListener('change', fetchLogs);
+
+        // Initial load
+        fetchUsers();
+        fetchStats();
+        fetchLogs();
+    </script>
+</body>
+</html>
