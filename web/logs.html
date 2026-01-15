@@ -85,6 +85,11 @@
             color: #64b5f6;
         }
 
+        .logs-table td.app {
+            color: #81c784;
+            font-weight: 500;
+        }
+
         .logs-table td.data {
             font-family: monospace;
             font-size: 0.8rem;
@@ -170,6 +175,10 @@
                 <a href="/app" class="back-link">Back to App</a>
             </div>
             <div class="logs-filters">
+                <select id="app-filter">
+                    <option value="">All Apps</option>
+                    <option value="tongue">tongue</option>
+                </select>
                 <select id="user-filter">
                     <option value="">All Users</option>
                 </select>
@@ -287,6 +296,7 @@
         }
 
         async function fetchLogs() {
+            const appFilter = document.getElementById('app-filter').value;
             const userFilter = document.getElementById('user-filter').value;
             const eventFilter = document.getElementById('event-filter').value;
             const container = document.getElementById('logs-content');
@@ -312,6 +322,11 @@
                         }
                     }
 
+                    // Filter by app if specified
+                    if (appFilter) {
+                        allEvents = allEvents.filter(e => (e.app_name || 'tongue') === appFilter);
+                    }
+
                     // Sort by timestamp descending and take top 100
                     allEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                     allEvents = allEvents.slice(0, 100);
@@ -331,7 +346,13 @@
                     const response = await fetch(url);
                     const data = await response.json();
 
-                    renderLogs(data.events || []);
+                    let events = data.events || [];
+                    // Filter by app if specified
+                    if (appFilter) {
+                        events = events.filter(e => (e.app_name || 'tongue') === appFilter);
+                    }
+
+                    renderLogs(events);
                 } catch (e) {
                     console.error('Failed to fetch logs:', e);
                     container.innerHTML = '<div class="no-data">Failed to load logs</div>';
@@ -352,6 +373,7 @@
                     <thead>
                         <tr>
                             <th>Time</th>
+                            <th>App</th>
                             <th>Event</th>
                             <th>User</th>
                             <th>Level</th>
@@ -367,6 +389,7 @@
                 html += `
                     <tr>
                         <td class="timestamp">${formatTimestamp(event.timestamp)}</td>
+                        <td class="app">${event.app_name || 'tongue'}</td>
                         <td class="event"><span class="event-badge ${badgeClass}">${event.event}</span></td>
                         <td class="user">${event.user_id}</td>
                         <td>${event.difficulty || '-'}</td>
@@ -386,6 +409,7 @@
             fetchLogs();
         });
 
+        document.getElementById('app-filter').addEventListener('change', fetchLogs);
         document.getElementById('user-filter').addEventListener('change', fetchLogs);
         document.getElementById('event-filter').addEventListener('change', fetchLogs);
 

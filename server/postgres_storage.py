@@ -89,6 +89,7 @@ class PostgresStorage(Storage):
                 CREATE TABLE IF NOT EXISTS events (
                     id SERIAL PRIMARY KEY,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    app_name VARCHAR(50) NOT NULL DEFAULT 'tongue',
                     event VARCHAR(50) NOT NULL,
                     user_id VARCHAR(255) NOT NULL,
                     session_id VARCHAR(64),
@@ -107,6 +108,21 @@ class PostgresStorage(Storage):
             """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)
+            """)
+            # Add app_name column if it doesn't exist (for existing databases)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'events' AND column_name = 'app_name'
+                    ) THEN
+                        ALTER TABLE events ADD COLUMN app_name VARCHAR(50) NOT NULL DEFAULT 'tongue';
+                    END IF;
+                END $$;
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_events_app_name ON events(app_name)
             """)
             # API stats table
             cur.execute("""
@@ -328,14 +344,14 @@ class PostgresStorage(Storage):
 
     # Event logging methods
     def log_event(self, event: str, user_id: str, session_id: str = None,
-                  difficulty: int = None, **data) -> None:
+                  difficulty: int = None, app_name: str = "tongue", **data) -> None:
         """Log an event to the database."""
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO events (event, user_id, session_id, difficulty, data)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (event, user_id, session_id, difficulty, json.dumps(data) if data else None))
+                    INSERT INTO events (app_name, event, user_id, session_id, difficulty, data)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (app_name, event, user_id, session_id, difficulty, json.dumps(data) if data else None))
             self.conn.commit()
         except Exception as e:
             print(f"Error logging event: {e}")
