@@ -94,6 +94,10 @@ class PostgresStorage(Storage):
                     user_id VARCHAR(255) NOT NULL,
                     session_id VARCHAR(64),
                     difficulty INTEGER,
+                    ai_used BOOLEAN DEFAULT FALSE,
+                    model_name VARCHAR(100),
+                    model_tokens INTEGER,
+                    model_ms INTEGER,
                     data JSONB
                 )
             """)
@@ -123,6 +127,36 @@ class PostgresStorage(Storage):
             """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_events_app_name ON events(app_name)
+            """)
+            # Add AI tracking columns if they don't exist (for existing databases)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'events' AND column_name = 'ai_used'
+                    ) THEN
+                        ALTER TABLE events ADD COLUMN ai_used BOOLEAN DEFAULT FALSE;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'events' AND column_name = 'model_name'
+                    ) THEN
+                        ALTER TABLE events ADD COLUMN model_name VARCHAR(100);
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'events' AND column_name = 'model_tokens'
+                    ) THEN
+                        ALTER TABLE events ADD COLUMN model_tokens INTEGER;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'events' AND column_name = 'model_ms'
+                    ) THEN
+                        ALTER TABLE events ADD COLUMN model_ms INTEGER;
+                    END IF;
+                END $$;
             """)
             # API stats table
             cur.execute("""
@@ -344,14 +378,19 @@ class PostgresStorage(Storage):
 
     # Event logging methods
     def log_event(self, event: str, user_id: str, session_id: str = None,
-                  difficulty: int = None, app_name: str = "tongue", **data) -> None:
+                  difficulty: int = None, app_name: str = "tongue",
+                  ai_used: bool = False, model_name: str = None,
+                  model_tokens: int = None, model_ms: int = None, **data) -> None:
         """Log an event to the database."""
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO events (app_name, event, user_id, session_id, difficulty, data)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (app_name, event, user_id, session_id, difficulty, json.dumps(data) if data else None))
+                    INSERT INTO events (app_name, event, user_id, session_id, difficulty,
+                                        ai_used, model_name, model_tokens, model_ms, data)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (app_name, event, user_id, session_id, difficulty,
+                      ai_used, model_name, model_tokens, model_ms,
+                      json.dumps(data) if data else None))
             self.conn.commit()
         except Exception as e:
             print(f"Error logging event: {e}")
