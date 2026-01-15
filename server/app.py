@@ -1025,6 +1025,15 @@ async def get_event_apps():
     return {"apps": storage.get_app_names()}
 
 
+@app.get("/api/events/users")
+async def get_event_users():
+    """Get all unique user IDs from events."""
+    if not hasattr(storage, 'get_event_users'):
+        return {"users": []}
+
+    return {"users": storage.get_event_users()}
+
+
 @app.get("/api/events/stats")
 async def get_event_stats(user_id: str = None):
     """Get aggregated event statistics."""
@@ -1038,12 +1047,13 @@ async def get_event_stats(user_id: str = None):
 
 
 @app.get("/api/events/recent")
-async def get_recent_events(user_id: str, event_type: str = None, limit: int = 50):
-    """Get recent events for a user."""
-    if not hasattr(storage, 'get_user_events'):
+async def get_recent_events(user_id: str = None, event_type: str = None,
+                            app_name: str = None, limit: int = 100):
+    """Get recent events with optional filters."""
+    if not hasattr(storage, 'get_events'):
         return {"error": "Event logging not available with current storage"}
 
-    events = storage.get_user_events(user_id, event_type, limit)
+    events = storage.get_events(user_id, event_type, app_name, limit)
     # Convert datetime objects to strings for JSON serialization
     for event in events:
         if 'timestamp' in event and hasattr(event['timestamp'], 'isoformat'):

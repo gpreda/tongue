@@ -262,9 +262,11 @@
 
         async function fetchUsers() {
             try {
-                const response = await fetch(`${API_BASE}/api/users`);
+                const response = await fetch(`${API_BASE}/api/events/users`);
                 const data = await response.json();
                 const select = document.getElementById('user-filter');
+                // Clear existing options except "All Users"
+                select.innerHTML = '<option value="">All Users</option>';
                 data.users.forEach(user => {
                     const option = document.createElement('option');
                     option.value = user;
@@ -353,62 +355,24 @@
             const eventFilter = document.getElementById('event-filter').value;
             const container = document.getElementById('logs-content');
 
-            if (!userFilter) {
-                // Need to fetch logs for all users - get list first
-                container.innerHTML = '<div class="loading">Loading logs...</div>';
+            container.innerHTML = '<div class="loading">Loading logs...</div>';
 
-                try {
-                    const usersResponse = await fetch(`${API_BASE}/api/users`);
-                    const usersData = await usersResponse.json();
+            try {
+                // Build URL with optional filters
+                const params = new URLSearchParams();
+                if (appFilter) params.append('app_name', appFilter);
+                if (userFilter) params.append('user_id', userFilter);
+                if (eventFilter) params.append('event_type', eventFilter);
+                params.append('limit', '100');
 
-                    // Fetch logs for each user and combine
-                    let allEvents = [];
-                    for (const user of usersData.users) {
-                        const url = eventFilter
-                            ? `${API_BASE}/api/events/recent?user_id=${encodeURIComponent(user)}&event_type=${eventFilter}&limit=100`
-                            : `${API_BASE}/api/events/recent?user_id=${encodeURIComponent(user)}&limit=100`;
-                        const response = await fetch(url);
-                        const data = await response.json();
-                        if (data.events) {
-                            allEvents = allEvents.concat(data.events);
-                        }
-                    }
+                const url = `${API_BASE}/api/events/recent?${params.toString()}`;
+                const response = await fetch(url);
+                const data = await response.json();
 
-                    // Filter by app if specified
-                    if (appFilter) {
-                        allEvents = allEvents.filter(e => (e.app_name || 'tongue') === appFilter);
-                    }
-
-                    // Sort by timestamp descending and take top 100
-                    allEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                    allEvents = allEvents.slice(0, 100);
-
-                    renderLogs(allEvents);
-                } catch (e) {
-                    console.error('Failed to fetch logs:', e);
-                    container.innerHTML = '<div class="no-data">Failed to load logs</div>';
-                }
-            } else {
-                container.innerHTML = '<div class="loading">Loading logs...</div>';
-
-                try {
-                    const url = eventFilter
-                        ? `${API_BASE}/api/events/recent?user_id=${encodeURIComponent(userFilter)}&event_type=${eventFilter}&limit=100`
-                        : `${API_BASE}/api/events/recent?user_id=${encodeURIComponent(userFilter)}&limit=100`;
-                    const response = await fetch(url);
-                    const data = await response.json();
-
-                    let events = data.events || [];
-                    // Filter by app if specified
-                    if (appFilter) {
-                        events = events.filter(e => (e.app_name || 'tongue') === appFilter);
-                    }
-
-                    renderLogs(events);
-                } catch (e) {
-                    console.error('Failed to fetch logs:', e);
-                    container.innerHTML = '<div class="no-data">Failed to load logs</div>';
-                }
+                renderLogs(data.events || []);
+            } catch (e) {
+                console.error('Failed to fetch logs:', e);
+                container.innerHTML = '<div class="no-data">Failed to load logs</div>';
             }
         }
 

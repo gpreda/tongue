@@ -418,6 +418,36 @@ class PostgresStorage(Storage):
             print(f"Error getting user events: {e}")
             return []
 
+    def get_events(self, user_id: str = None, event_type: str = None,
+                   app_name: str = None, limit: int = 100) -> list[dict]:
+        """Get recent events with optional filters."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                conditions = []
+                params = []
+                if user_id:
+                    conditions.append("user_id = %s")
+                    params.append(user_id)
+                if event_type:
+                    conditions.append("event = %s")
+                    params.append(event_type)
+                if app_name:
+                    conditions.append("app_name = %s")
+                    params.append(app_name)
+
+                where_clause = " AND ".join(conditions) if conditions else "1=1"
+                params.append(limit)
+
+                cur.execute(f"""
+                    SELECT * FROM events
+                    WHERE {where_clause}
+                    ORDER BY timestamp DESC LIMIT %s
+                """, params)
+                return [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error getting events: {e}")
+            return []
+
     def get_user_stats(self, user_id: str) -> dict:
         """Get aggregated stats for a user."""
         try:
@@ -525,6 +555,18 @@ class PostgresStorage(Storage):
                 return [row[0] for row in cur.fetchall()]
         except Exception as e:
             print(f"Error getting app names: {e}")
+            return []
+
+    def get_event_users(self) -> list[str]:
+        """Get all unique user IDs from events."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT user_id FROM events ORDER BY user_id
+                """)
+                return [row[0] for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error getting event users: {e}")
             return []
 
     def load_api_stats(self, provider_name: str) -> dict | None:
