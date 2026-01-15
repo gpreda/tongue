@@ -1016,6 +1016,15 @@ async def get_api_stats():
     return merged
 
 
+@app.get("/api/events/apps")
+async def get_event_apps():
+    """Get all unique app names from events."""
+    if not hasattr(storage, 'get_app_names'):
+        return {"apps": []}
+
+    return {"apps": storage.get_app_names()}
+
+
 @app.get("/api/events/stats")
 async def get_event_stats(user_id: str = None):
     """Get aggregated event statistics."""

@@ -476,6 +476,18 @@ class PostgresStorage(Storage):
             print(f"Error getting global stats: {e}")
             return {}
 
+    def get_app_names(self) -> list[str]:
+        """Get all unique app names from events."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT app_name FROM events ORDER BY app_name
+                """)
+                return [row[0] for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error getting app names: {e}")
+            return []
+
     def load_api_stats(self, provider_name: str) -> dict | None:
         """Load API usage stats for a provider."""
         try:

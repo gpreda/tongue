@@ -177,7 +177,6 @@
             <div class="logs-filters">
                 <select id="app-filter">
                     <option value="">All Apps</option>
-                    <option value="tongue">tongue</option>
                 </select>
                 <select id="user-filter">
                     <option value="">All Users</option>
@@ -207,6 +206,24 @@
 
     <script>
         const API_BASE = '';
+
+        async function fetchApps() {
+            try {
+                const response = await fetch(`${API_BASE}/api/events/apps`);
+                const data = await response.json();
+                const select = document.getElementById('app-filter');
+                // Clear existing options except "All Apps"
+                select.innerHTML = '<option value="">All Apps</option>';
+                data.apps.forEach(app => {
+                    const option = document.createElement('option');
+                    option.value = app;
+                    option.textContent = app;
+                    select.appendChild(option);
+                });
+            } catch (e) {
+                console.error('Failed to fetch apps:', e);
+            }
+        }
 
         async function fetchUsers() {
             try {
@@ -414,6 +431,7 @@
         document.getElementById('event-filter').addEventListener('change', fetchLogs);
 
         // Initial load
+        fetchApps();
         fetchUsers();
         fetchStats();
         fetchLogs();
