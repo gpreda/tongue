@@ -184,8 +184,13 @@ class GeminiProvider(AIProvider):
                - Using articles (a/an/the) flexibly
                - Capitalization differences (e.g., "monday" instead of "Monday", or not capitalizing the first word)
                - Missing or different punctuation (periods, commas, exclamation marks)
+               - Reflexive pronouns (se, me, te) that are naturally absorbed into English phrasal verbs
+                 (e.g., "se pone" → "puts on" is correct, don't require "himself/herself")
+               - Grammar elements that have no direct English equivalent when the meaning is preserved
             4. Only proper nouns (names of people, places, brands) may remain in original form.
             5. If the translation is semantically correct with all words properly translated, the score should be 100.
+            6. IMPORTANT: If the student's translation conveys the complete meaning naturally in English,
+               give 100. Do not deduct points for stylistic differences or implied grammar.
 
             STEP 3 - RESPOND with a Python dictionary:
 
@@ -199,6 +204,8 @@ class GeminiProvider(AIProvider):
                   IMPORTANT: Check the actual English word the student used, not just sentence meaning.
 
             'correct_translation': A proper English translation of the sentence.
+              If the student's translation is correct, you may use their translation.
+              If the score is less than 100, show a translation that demonstrates what was missed or wrong.
 
             'score': Integer 1-100. Base it on:
               - What percentage of words were correctly translated
