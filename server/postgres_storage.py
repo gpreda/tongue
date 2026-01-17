@@ -582,6 +582,64 @@ class PostgresStorage(Storage):
             print(f"Error getting event users: {e}")
             return []
 
+    def get_perf_stats(self, app_name: str = None) -> list[dict]:
+        """Get performance statistics grouped by event type."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                app_filter = "AND app_name = %s" if app_name else ""
+                params = (app_name,) if app_name else ()
+
+                cur.execute(f"""
+                    WITH event_stats AS (
+                        SELECT
+                            event,
+                            COUNT(*) as invocations,
+                            COUNT(DISTINCT session_id) as sessions,
+                            COUNT(*) FILTER (WHERE ms IS NOT NULL) as ms_count,
+                            AVG(ms) FILTER (WHERE ms IS NOT NULL) as avg_ms,
+                            MIN(ms) FILTER (WHERE ms IS NOT NULL) as min_ms,
+                            MAX(ms) FILTER (WHERE ms IS NOT NULL) as max_ms,
+                            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ms) FILTER (WHERE ms IS NOT NULL) as p50_ms,
+                            PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY ms) FILTER (WHERE ms IS NOT NULL) as p90_ms,
+                            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ms) FILTER (WHERE ms IS NOT NULL) as p95_ms,
+                            PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ms) FILTER (WHERE ms IS NOT NULL) as p99_ms,
+                            COUNT(*) FILTER (WHERE ai_used = TRUE) as ai_invocations,
+                            AVG(model_ms) FILTER (WHERE model_ms IS NOT NULL) as avg_model_ms,
+                            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY model_ms) FILTER (WHERE model_ms IS NOT NULL) as p50_model_ms,
+                            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY model_ms) FILTER (WHERE model_ms IS NOT NULL) as p95_model_ms,
+                            SUM(model_tokens) FILTER (WHERE model_tokens IS NOT NULL) as total_tokens,
+                            AVG(model_tokens) FILTER (WHERE model_tokens IS NOT NULL) as avg_tokens
+                        FROM events
+                        WHERE 1=1 {app_filter}
+                        GROUP BY event
+                    )
+                    SELECT
+                        event,
+                        invocations,
+                        sessions,
+                        CASE WHEN sessions > 0 THEN ROUND(invocations::numeric / sessions, 2) ELSE 0 END as avg_per_session,
+                        ms_count,
+                        ROUND(avg_ms::numeric, 1) as avg_ms,
+                        min_ms,
+                        max_ms,
+                        ROUND(p50_ms::numeric, 1) as p50_ms,
+                        ROUND(p90_ms::numeric, 1) as p90_ms,
+                        ROUND(p95_ms::numeric, 1) as p95_ms,
+                        ROUND(p99_ms::numeric, 1) as p99_ms,
+                        ai_invocations,
+                        ROUND(avg_model_ms::numeric, 1) as avg_model_ms,
+                        ROUND(p50_model_ms::numeric, 1) as p50_model_ms,
+                        ROUND(p95_model_ms::numeric, 1) as p95_model_ms,
+                        total_tokens,
+                        ROUND(avg_tokens::numeric, 0) as avg_tokens
+                    FROM event_stats
+                    ORDER BY invocations DESC
+                """, params)
+                return [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error getting perf stats: {e}")
+            return []
+
     def load_api_stats(self, provider_name: str) -> dict | None:
         """Load API usage stats for a provider."""
         try:

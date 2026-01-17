@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tongue - Performance Stats</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .perf-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .perf-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .perf-header h1 {
+            margin: 0;
+        }
+
+        .perf-filters {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .perf-filters select {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #333;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-size: 0.9rem;
+        }
+
+        .perf-filters button {
+            padding: 8px 16px;
+        }
+
+        .perf-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .perf-table th,
+        .perf-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .perf-table th {
+            background: rgba(255, 255, 255, 0.05);
+            color: #8892b0;
+            font-weight: 500;
+            position: sticky;
+            top: 0;
+            white-space: nowrap;
+        }
+
+        .perf-table tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .perf-table td.event {
+            font-weight: 500;
+            color: #64b5f6;
+        }
+
+        .perf-table td.number {
+            text-align: right;
+            font-family: monospace;
+        }
+
+        .perf-table td.ms {
+            text-align: right;
+            font-family: monospace;
+            color: #81c784;
+        }
+
+        .perf-table td.tokens {
+            text-align: right;
+            font-family: monospace;
+            color: #ce93d8;
+        }
+
+        .perf-table td.ai-ms {
+            text-align: right;
+            font-family: monospace;
+            color: #ffb74d;
+        }
+
+        .section-header {
+            background: rgba(100, 181, 246, 0.1);
+            color: #64b5f6;
+            font-weight: 600;
+        }
+
+        .back-link {
+            color: #64b5f6;
+            text-decoration: none;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 15px;
+        }
+
+        .summary-cards {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .summary-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px 20px;
+            border-radius: 8px;
+            min-width: 150px;
+        }
+
+        .summary-card .value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #64b5f6;
+        }
+
+        .summary-card .label {
+            font-size: 0.8rem;
+            color: #8892b0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #8892b0;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="perf-container">
+        <div class="perf-header">
+            <div>
+                <h1>Performance Stats</h1>
+                <div class="nav-links">
+                    <a href="/app" class="back-link">Back to App</a>
+                    <a href="/logs" class="back-link">View Logs</a>
+                </div>
+            </div>
+            <div class="perf-filters">
+                <select id="app-filter">
+                    <option value="">All Apps</option>
+                </select>
+                <button id="refresh-btn" class="btn-primary">Refresh</button>
+            </div>
+        </div>
+
+        <div id="summary-cards" class="summary-cards"></div>
+
+        <div id="perf-content">
+            <div class="loading">Loading performance stats...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        async function fetchApps() {
+            try {
+                const response = await fetch(`${API_BASE}/api/events/apps`);
+                const data = await response.json();
+                const select = document.getElementById('app-filter');
+                select.innerHTML = '<option value="">All Apps</option>';
+                data.apps.forEach(app => {
+                    const option = document.createElement('option');
+                    option.value = app;
+                    option.textContent = app;
+                    select.appendChild(option);
+                });
+            } catch (e) {
+                console.error('Failed to fetch apps:', e);
+            }
+        }
+
+        async function fetchPerfStats() {
+            const appFilter = document.getElementById('app-filter').value;
+            const container = document.getElementById('perf-content');
+            const summaryContainer = document.getElementById('summary-cards');
+
+            container.innerHTML = '<div class="loading">Loading performance stats...</div>';
+
+            try {
+                const params = new URLSearchParams();
+                if (appFilter) params.append('app_name', appFilter);
+
+                const url = `${API_BASE}/api/perf?${params.toString()}`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (!data.stats || data.stats.length === 0) {
+                    summaryContainer.innerHTML = '';
+                    container.innerHTML = '<div class="no-data">No performance data found</div>';
+                    return;
+                }
+
+                // Calculate summary stats
+                const totalInvocations = data.stats.reduce((sum, s) => sum + (s.invocations || 0), 0);
+                const totalSessions = new Set(data.stats.flatMap(s => s.sessions || 0)).size;
+                const aiInvocations = data.stats.reduce((sum, s) => sum + (s.ai_invocations || 0), 0);
+                const totalTokens = data.stats.reduce((sum, s) => sum + (s.total_tokens || 0), 0);
+
+                summaryContainer.innerHTML = `
+                    <div class="summary-card">
+                        <div class="value">${totalInvocations.toLocaleString()}</div>
+                        <div class="label">Total Events</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="value">${data.stats.length}</div>
+                        <div class="label">Event Types</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="value">${aiInvocations.toLocaleString()}</div>
+                        <div class="label">AI Calls</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="value">${totalTokens.toLocaleString()}</div>
+                        <div class="label">Total Tokens</div>
+                    </div>
+                `;
+
+                renderPerfTable(data.stats);
+            } catch (e) {
+                console.error('Failed to fetch perf stats:', e);
+                container.innerHTML = '<div class="no-data">Failed to load performance stats</div>';
+            }
+        }
+
+        function formatNumber(val) {
+            if (val === null || val === undefined) return '-';
+            return val.toLocaleString();
+        }
+
+        function formatMs(val) {
+            if (val === null || val === undefined) return '-';
+            return val.toLocaleString() + ' ms';
+        }
+
+        function renderPerfTable(stats) {
+            const container = document.getElementById('perf-content');
+
+            let html = `
+                <div class="table-wrapper">
+                <table class="perf-table">
+                    <thead>
+                        <tr>
+                            <th>Event</th>
+                            <th>Count</th>
+                            <th>Sessions</th>
+                            <th>Avg/Session</th>
+                            <th>Avg MS</th>
+                            <th>P50 MS</th>
+                            <th>P90 MS</th>
+                            <th>P95 MS</th>
+                            <th>P99 MS</th>
+                            <th>Min MS</th>
+                            <th>Max MS</th>
+                            <th>AI Calls</th>
+                            <th>Avg AI MS</th>
+                            <th>P50 AI MS</th>
+                            <th>P95 AI MS</th>
+                            <th>Total Tokens</th>
+                            <th>Avg Tokens</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            for (const stat of stats) {
+                html += `
+                    <tr>
+                        <td class="event">${stat.event}</td>
+                        <td class="number">${formatNumber(stat.invocations)}</td>
+                        <td class="number">${formatNumber(stat.sessions)}</td>
+                        <td class="number">${stat.avg_per_session || '-'}</td>
+                        <td class="ms">${stat.avg_ms || '-'}</td>
+                        <td class="ms">${stat.p50_ms || '-'}</td>
+                        <td class="ms">${stat.p90_ms || '-'}</td>
+                        <td class="ms">${stat.p95_ms || '-'}</td>
+                        <td class="ms">${stat.p99_ms || '-'}</td>
+                        <td class="ms">${stat.min_ms || '-'}</td>
+                        <td class="ms">${stat.max_ms || '-'}</td>
+                        <td class="number">${formatNumber(stat.ai_invocations)}</td>
+                        <td class="ai-ms">${stat.avg_model_ms || '-'}</td>
+                        <td class="ai-ms">${stat.p50_model_ms || '-'}</td>
+                        <td class="ai-ms">${stat.p95_model_ms || '-'}</td>
+                        <td class="tokens">${formatNumber(stat.total_tokens)}</td>
+                        <td class="tokens">${stat.avg_tokens || '-'}</td>
+                    </tr>
+                `;
+            }
+
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        // Event listeners
+        document.getElementById('refresh-btn').addEventListener('click', fetchPerfStats);
+        document.getElementById('app-filter').addEventListener('change', fetchPerfStats);
+
+        // Initial load
+        fetchApps();
+        fetchPerfStats();
+    </script>
+</body>
+</html>

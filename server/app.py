@@ -171,6 +171,12 @@ async def serve_logs():
     return FileResponse(WEB_DIR / "logs.html")
 
 
+@app.get("/perf")
+async def serve_perf():
+    """Serve the performance stats page."""
+    return FileResponse(WEB_DIR / "perf.html")
+
+
 def get_history(user_id: str = "default") -> History:
     """Get or create history for a user."""
     if user_id not in user_histories:
@@ -1059,6 +1065,21 @@ async def get_recent_events(user_id: str = None, event_type: str = None,
         if 'timestamp' in event and hasattr(event['timestamp'], 'isoformat'):
             event['timestamp'] = event['timestamp'].isoformat()
     return {"events": events}
+
+
+@app.get("/api/perf")
+async def get_perf_stats(app_name: str = None):
+    """Get performance statistics grouped by event type."""
+    if not hasattr(storage, 'get_perf_stats'):
+        return {"error": "Performance stats not available with current storage"}
+
+    stats = storage.get_perf_stats(app_name)
+    # Convert Decimal types to float for JSON serialization
+    for stat in stats:
+        for key, value in stat.items():
+            if hasattr(value, '__float__'):
+                stat[key] = float(value) if value is not None else None
+    return {"stats": stats}
 
 
 def create_app():
