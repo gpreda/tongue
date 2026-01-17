@@ -394,10 +394,11 @@
                             <th>User</th>
                             <th>Level</th>
                             <th>Session</th>
+                            <th>MS</th>
                             <th>AI</th>
                             <th>Model</th>
                             <th>Tokens</th>
-                            <th>MS</th>
+                            <th>AI MS</th>
                             <th>Details</th>
                         </tr>
                     </thead>
@@ -416,6 +417,7 @@
                         <td class="user">${event.user_id}</td>
                         <td>${event.difficulty || '-'}</td>
                         <td>${event.session_id || '-'}</td>
+                        <td class="ms">${event.ms || '-'}</td>
                         <td class="ai"><span class="ai-badge ${aiClass}">${aiLabel}</span></td>
                         <td class="model">${event.model_name || '-'}</td>
                         <td class="tokens">${event.model_tokens || '-'}</td>

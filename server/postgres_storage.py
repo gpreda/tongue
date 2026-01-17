@@ -94,6 +94,7 @@ class PostgresStorage(Storage):
                     user_id VARCHAR(255) NOT NULL,
                     session_id VARCHAR(64),
                     difficulty INTEGER,
+                    ms INTEGER,
                     ai_used BOOLEAN DEFAULT FALSE,
                     model_name VARCHAR(100),
                     model_tokens INTEGER,
@@ -127,6 +128,18 @@ class PostgresStorage(Storage):
             """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_events_app_name ON events(app_name)
+            """)
+            # Add ms column if it doesn't exist (for existing databases)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'events' AND column_name = 'ms'
+                    ) THEN
+                        ALTER TABLE events ADD COLUMN ms INTEGER;
+                    END IF;
+                END $$;
             """)
             # Add AI tracking columns if they don't exist (for existing databases)
             cur.execute("""
@@ -378,17 +391,17 @@ class PostgresStorage(Storage):
 
     # Event logging methods
     def log_event(self, event: str, user_id: str, session_id: str = None,
-                  difficulty: int = None, app_name: str = "tongue",
+                  difficulty: int = None, app_name: str = "tongue", ms: int = None,
                   ai_used: bool = False, model_name: str = None,
                   model_tokens: int = None, model_ms: int = None, **data) -> None:
         """Log an event to the database."""
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO events (app_name, event, user_id, session_id, difficulty,
+                    INSERT INTO events (app_name, event, user_id, session_id, difficulty, ms,
                                         ai_used, model_name, model_tokens, model_ms, data)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (app_name, event, user_id, session_id, difficulty,
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (app_name, event, user_id, session_id, difficulty, ms,
                       ai_used, model_name, model_tokens, model_ms,
                       json.dumps(data) if data else None))
             self.conn.commit()
