@@ -579,11 +579,24 @@ async function handleSubmit(e) {
 
     } catch (error) {
         console.error('Error submitting:', error);
-        alert('Failed to submit translation');
+        showSubmitError(error.message || 'Unknown error');
         elements.submitBtn.disabled = false;
     } finally {
         elements.submitBtn.textContent = 'Submit';
     }
+}
+
+function showSubmitError(message) {
+    // Show error in the validation result area so it's visible on mobile
+    elements.validationResult.style.display = 'block';
+    elements.validationResult.className = 'result-box error';
+    elements.validationResult.innerHTML = `
+        <h3>Submission Failed</h3>
+        <p><strong>Error:</strong> ${message}</p>
+        <p style="margin-top: 10px; font-size: 0.9em; color: #666;">
+            Try submitting again. If the problem persists, check your connection.
+        </p>
+    `;
 }
 
 async function handleHint() {
