@@ -61,6 +61,12 @@ header h1 {
     margin-bottom: 25px;
 }
 
+.pin-hint {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-bottom: 15px !important;
+}
+
 #start-form {
     display: flex;
     flex-direction: column;
@@ -807,6 +813,60 @@ header h1 {
 
 .stats-table th:not(:first-child) {
     text-align: right;
+}
+
+/* Error Log Panel */
+.error-log {
+    margin-top: 20px;
+    padding: 15px;
+    background: rgba(231, 76, 60, 0.08);
+    border: 1px solid rgba(231, 76, 60, 0.2);
+    border-radius: 10px;
+}
+
+.error-log h3 {
+    color: #e74c3c;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+}
+
+.error-entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(231, 76, 60, 0.1);
+    font-size: 0.8rem;
+}
+
+.error-entry:last-child {
+    border-bottom: none;
+}
+
+.error-time {
+    color: #6c757d;
+    font-family: monospace;
+}
+
+.error-endpoint {
+    color: #f39c12;
+    font-family: monospace;
+    font-weight: 500;
+}
+
+.error-status {
+    color: #e74c3c;
+    font-weight: 600;
+}
+
+.error-message {
+    color: #ccd6f6;
+    word-break: break-word;
+    flex: 1;
+    min-width: 200px;
 }
 
 /* Utility Classes */

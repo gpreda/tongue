@@ -371,6 +371,36 @@ class GeminiProvider(AIProvider):
             logger.error(f"Raw response:\n{raw_response}")
             return None
 
+    def validate_verb_translation(self, conjugated_form: str, base_verb: str,
+                                    correct_translation: str, student_answer: str) -> dict:
+        """Check if student's answer is a valid translation of the verb, any tense accepted.
+        Returns dict with 'translation_correct' (bool) and 'explanation' (str)."""
+        prompt = f"""
+            A student is translating the Spanish verb "{conjugated_form}" (infinitive: {base_verb}).
+            The expected translation is: "{correct_translation}"
+            The student answered: "{student_answer}"
+
+            Is the student's answer a valid English translation of this verb?
+            Accept ANY English tense form as correct. For example:
+            - "fly", "flew", "flies", "flying", "flown" are ALL correct for the verb "volar"
+            - "run", "ran", "runs", "running" are ALL correct for "correr"
+            - But "eat" would be WRONG for "correr"
+
+            Respond with ONLY a Python dictionary:
+            {{'correct': True/False, 'explanation': 'brief reason'}}
+        """
+        response, ms, token_stats = self._execute_chat(prompt)
+        self._record_stats('verb_analysis', ms, token_stats)
+        try:
+            response = response.strip().replace('```python', '').replace('```', '')
+            response = response.replace('true', 'True').replace('false', 'False')
+            result = eval(response)
+            if isinstance(result, dict) and 'correct' in result:
+                return result
+        except Exception as e:
+            logger.error(f"Failed to parse verb validation: {e}")
+        return {'correct': False, 'explanation': 'Could not evaluate'}
+
     def analyze_verb_conjugation(self, conjugated_form: str) -> dict | None:
         """Analyze a conjugated Spanish verb form.
         Returns dict with base_verb, tense, translation, person or None on error."""

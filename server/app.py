@@ -3,12 +3,14 @@
 import asyncio
 import logging
 import os
+import traceback
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -51,6 +53,14 @@ class CreateUserRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     pin: str
+
+
+class ErrorLogRequest(BaseModel):
+    error: str
+    endpoint: str = ""
+    user_id: str = ""
+    status: int = 0
+    context: str = ""
 
 
 class StoryResponse(BaseModel):
@@ -154,6 +164,18 @@ def log_event(event: str, user_id: str, **data) -> None:
 
 
 app = FastAPI(title="Tongue API", description="Spanish translation practice API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://tongue.pr3da.com",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
@@ -369,9 +391,10 @@ async def login_user(user_id: str, request: LoginRequest):
 @app.get("/api/status", response_model=StatusResponse)
 async def get_status(user_id: str = "default"):
     """Get user status and progress."""
-    history = get_history(user_id)
+    try:
+        history = get_history(user_id)
 
-    return StatusResponse(
+        return StatusResponse(
         language=LANGUAGE,
         difficulty=history.difficulty,
         max_difficulty=MAX_DIFFICULTY,
@@ -384,9 +407,20 @@ async def get_status(user_id: str = "default"):
         poor_score_count=history.get_poor_score_count(),
         story_sentences_remaining=len(history.story_sentences),
         progress_display=history.get_progress_display(),
-        challenge_stats=history.challenge_stats,
-        challenge_stats_display=history.get_challenge_stats_display()
-    )
+            challenge_stats=history.challenge_stats,
+            challenge_stats_display=history.get_challenge_stats_display()
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_status: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        log_event('error.server', user_id,
+                  endpoint='/api/status',
+                  error_type=type(e).__name__,
+                  error_message=str(e),
+                  traceback=traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
 @app.get("/api/story", response_model=StoryResponse)
@@ -437,6 +471,22 @@ async def get_story(user_id: str = "default", force_new: bool = False):
 @app.get("/api/next", response_model=NextSentenceResponse)
 async def get_next_sentence(user_id: str = "default"):
     """Get the next sentence, word challenge, vocab challenge, or verb challenge."""
+    try:
+        return await _get_next_sentence_inner(user_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_next_sentence: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        log_event('error.server', user_id,
+                  endpoint='/api/next',
+                  error_type=type(e).__name__,
+                  error_message=str(e),
+                  traceback=traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+async def _get_next_sentence_inner(user_id: str = "default"):
     history = get_history(user_id)
 
     # Check if there's an existing unevaluated round (e.g., after page refresh)
@@ -711,30 +761,32 @@ async def submit_translation(request: TranslationRequest):
 
             correct_translation = stored['translation']
             correct_tense = stored['tense']
+            base_verb = stored.get('base_verb', conjugated_form)
 
-            # Parse correct answers (comma-separated)
-            correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
-
-            # Check translation (case-insensitive)
-            student_answer = request.translation.strip().lower()
-            translation_correct = student_answer in correct_answers
+            # Check translation using AI — accepts any English tense form of the verb
+            student_answer = request.translation.strip()
+            verb_check = ai_provider.validate_verb_translation(
+                conjugated_form, base_verb, correct_translation, student_answer
+            )
+            translation_correct = verb_check.get('correct', False)
 
             # Check tense
             selected_tense = (request.selected_tense or '').lower()
             tense_correct = selected_tense == correct_tense
 
-            # Both must be correct for full score
+            # Score translation and tense independently
+            # Translation is the primary score (worth 80 points), tense is secondary (worth 20 points)
+            translation_score = 80 if translation_correct else 0
+            tense_score = 20 if tense_correct else 0
+            score = translation_score + tense_score
+
             if translation_correct and tense_correct:
-                score = 100
                 evaluation = 'Correct!'
             elif translation_correct:
-                score = 50
-                evaluation = f'Translation correct, but the tense is {correct_tense}, not {selected_tense}.'
+                evaluation = f'Translation correct! But the tense is {correct_tense}, not {selected_tense}.'
             elif tense_correct:
-                score = 50
                 evaluation = f'Tense correct, but the translation should be: {correct_translation}'
             else:
-                score = 0
                 evaluation = f'The translation is "{correct_translation}" and the tense is {correct_tense}.'
 
             judgement = {
@@ -742,7 +794,9 @@ async def submit_translation(request: TranslationRequest):
                 'correct_translation': correct_translation,
                 'correct_tense': correct_tense,
                 'evaluation': evaluation,
-                'vocabulary_breakdown': [[conjugated_form, correct_translation, 'verb', translation_correct and tense_correct]]
+                'translation_correct': translation_correct,
+                'tense_correct': tense_correct,
+                'vocabulary_breakdown': [[conjugated_form, correct_translation, 'verb', translation_correct]]
             }
             judge_ms = 0
 
@@ -859,7 +913,11 @@ async def submit_translation(request: TranslationRequest):
 
             # Record challenge stats
             challenge_type = 'verb' if is_verb_challenge else ('vocab' if is_vocab_challenge else 'word')
-            is_fully_correct = judgement.get('score', 0) >= 100
+            if is_verb_challenge:
+                # For verb challenges, count translation correctness for the word stat
+                is_fully_correct = judgement.get('translation_correct', False)
+            else:
+                is_fully_correct = judgement.get('score', 0) >= 100
             history.record_challenge_result(challenge_type, is_fully_correct)
 
             # For word challenges, also update word tracking for learning
@@ -931,14 +989,34 @@ async def submit_translation(request: TranslationRequest):
         raise
     except Exception as e:
         logger.error(f"Error in submit_translation: {type(e).__name__}: {e}")
-        import traceback
         logger.error(traceback.format_exc())
+        log_event('error.server', request.user_id,
+                  endpoint='/api/translate',
+                  error_type=type(e).__name__,
+                  error_message=str(e),
+                  traceback=traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {str(e)}")
 
 
 @app.post("/api/hint", response_model=HintResponse)
 async def get_hint(request: HintRequest):
     """Get a hint for the current sentence."""
+    try:
+        return await _get_hint_inner(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_hint: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        log_event('error.server', request.user_id,
+                  endpoint='/api/hint',
+                  error_type=type(e).__name__,
+                  error_message=str(e),
+                  traceback=traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+async def _get_hint_inner(request: HintRequest):
     history = get_history(request.user_id)
 
     hint = ai_provider.get_hint(request.sentence, history.correct_words)
@@ -1080,6 +1158,36 @@ async def get_perf_stats(app_name: str = None):
             if hasattr(value, '__float__'):
                 stat[key] = float(value) if value is not None else None
     return {"stats": stats}
+
+
+@app.post("/api/error")
+async def log_client_error(request: ErrorLogRequest):
+    """Log a client-side error to the database."""
+    logger.error(f"Client error: {request.endpoint} - {request.error} (user={request.user_id}, status={request.status})")
+    log_event('error.client', request.user_id or 'unknown',
+              endpoint=request.endpoint,
+              error_message=request.error,
+              status_code=request.status,
+              context=request.context)
+    return {"logged": True}
+
+
+@app.get("/api/errors/recent")
+async def get_recent_errors(user_id: str = None, limit: int = 20):
+    """Get recent errors (both client and server)."""
+    if not hasattr(storage, 'get_events'):
+        return {"errors": []}
+
+    events = storage.get_events(user_id, event_type=None, app_name='tongue', limit=limit * 5)
+    errors = []
+    for event in events:
+        if event.get('event', '').startswith('error.'):
+            if 'timestamp' in event and hasattr(event['timestamp'], 'isoformat'):
+                event['timestamp'] = event['timestamp'].isoformat()
+            errors.append(event)
+            if len(errors) >= limit:
+                break
+    return {"errors": errors}
 
 
 def create_app():

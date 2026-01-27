@@ -122,18 +122,77 @@ const elements = {
     statsTableBody: document.getElementById('stats-table-body')
 };
 
+// Error log state
+const errorLog = [];
+
+function addErrorToLog(endpoint, error, status = 0) {
+    const entry = {
+        time: new Date().toLocaleTimeString(),
+        endpoint,
+        error: typeof error === 'string' ? error : (error.message || String(error)),
+        status
+    };
+    errorLog.unshift(entry);
+    if (errorLog.length > 50) errorLog.pop();
+    renderErrorLog();
+
+    // Report to server (fire and forget)
+    fetch(`${API_BASE}/api/error`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            error: entry.error,
+            endpoint,
+            user_id: currentUser || '',
+            status,
+            context: `page=${document.hidden ? 'hidden' : 'visible'}, online=${navigator.onLine}`
+        })
+    }).catch(() => {}); // ignore reporting failures
+}
+
+function renderErrorLog() {
+    const panel = document.getElementById('error-log');
+    const entries = document.getElementById('error-log-entries');
+    if (!panel || !entries) return;
+
+    if (errorLog.length === 0) {
+        panel.classList.add('hidden');
+        return;
+    }
+
+    panel.classList.remove('hidden');
+    entries.innerHTML = errorLog.map(e =>
+        `<div class="error-entry">
+            <span class="error-time">${e.time}</span>
+            <span class="error-endpoint">${e.endpoint}</span>
+            ${e.status ? `<span class="error-status">${e.status}</span>` : ''}
+            <span class="error-message">${e.error}</span>
+        </div>`
+    ).join('');
+}
+
 // API Functions
 async function api(endpoint, options = {}) {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-        headers: { 'Content-Type': 'application/json' },
-        ...options
-    });
+    let response;
+    try {
+        response = await fetch(`${API_BASE}${endpoint}`, {
+            headers: { 'Content-Type': 'application/json' },
+            ...options
+        });
+    } catch (fetchError) {
+        const msg = navigator.onLine
+            ? `Network error: ${fetchError.message}`
+            : 'You appear to be offline';
+        addErrorToLog(endpoint, msg, 0);
+        throw new Error(msg);
+    }
     if (!response.ok) {
         let detail = `API error: ${response.status}`;
         try {
             const data = await response.json();
             if (data.detail) detail = data.detail;
         } catch (e) {}
+        addErrorToLog(endpoint, detail, response.status);
         throw new Error(detail);
     }
     return response.json();
@@ -499,6 +558,7 @@ async function showLearningModal() {
 
 async function loadNextSentence() {
     elements.loading.classList.remove('hidden');
+    elements.loading.innerHTML = '<p>Loading story — this can take up to 30 seconds...</p>';
     elements.currentTask.classList.add('hidden');
     elements.validationResult.classList.add('hidden');
 
@@ -537,7 +597,7 @@ async function loadNextSentence() {
 
     } catch (error) {
         console.error('Error loading sentence:', error);
-        elements.loading.innerHTML = '<p>Error loading. <button onclick="loadNextSentence()">Retry</button></p>';
+        elements.loading.innerHTML = `<p>Error loading: ${error.message}</p><p><button onclick="loadNextSentence()">Retry</button></p>`;
     }
 }
 
