@@ -459,12 +459,20 @@ class History:
             return False
         return self.total_completed % WORD_CHALLENGE_INTERVAL == 0
 
+    @staticmethod
+    def _is_proper_noun(word: str) -> bool:
+        """Check if a word is a proper noun (personal name, place, etc.)."""
+        return word[0].isupper() if word else False
+
     def get_challenge_word(self) -> dict | None:
         """Get a word for word challenge. Picks from low success rate words.
+        Excludes proper nouns (personal names).
         Returns dict with word, type, translation or None if no words available."""
-        # Get words with low success rate (<=70%)
+        # Get words with low success rate (<=70%), excluding proper nouns
         candidates = []
         for word, info in self.words.items():
+            if self._is_proper_noun(word):
+                continue
             total = info['correct_count'] + info['incorrect_count']
             if total > 0:
                 success_rate = info['correct_count'] / total
@@ -477,10 +485,11 @@ class History:
                     })
 
         if not candidates:
-            # Fall back to any word if no low success rate words
-            if not self.words:
+            # Fall back to any non-proper-noun word if no low success rate words
+            eligible = [w for w in self.words.keys() if not self._is_proper_noun(w)]
+            if not eligible:
                 return None
-            word = random.choice(list(self.words.keys()))
+            word = random.choice(eligible)
             info = self.words[word]
             return {
                 'word': word,
