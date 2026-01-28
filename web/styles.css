@@ -404,28 +404,28 @@ header h1 {
 
 /* Multi-word vocabulary inputs */
 .multi-vocab-inputs {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
     margin-bottom: 15px;
 }
 
-.multi-vocab-row {
+.multi-vocab-card {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 
 .multi-vocab-word {
-    min-width: 120px;
     font-weight: 500;
     color: #fff;
     font-size: 1.1rem;
-    text-align: right;
+    text-align: center;
 }
 
 .multi-vocab-input {
-    flex: 1;
+    width: 100%;
     padding: 12px;
     font-size: 1rem;
     border: 2px solid rgba(255, 255, 255, 0.1);
@@ -433,6 +433,8 @@ header h1 {
     background: rgba(0, 0, 0, 0.2);
     color: #fff;
     transition: border-color 0.3s;
+    text-align: center;
+    box-sizing: border-box;
 }
 
 .multi-vocab-input:focus {
@@ -445,7 +447,7 @@ header h1 {
 }
 
 .multi-vocab-result {
-    min-width: 24px;
+    min-height: 24px;
     font-size: 1.2rem;
     text-align: center;
 }
@@ -1019,18 +1021,8 @@ header h1 {
         width: 100%;
     }
 
-    .multi-vocab-row {
-        flex-wrap: wrap;
-    }
-
-    .multi-vocab-word {
-        min-width: 100%;
-        text-align: left;
-        margin-bottom: 2px;
-    }
-
-    .multi-vocab-input {
-        flex: 1;
-        min-width: 0;
+    .multi-vocab-inputs {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
     }
 }

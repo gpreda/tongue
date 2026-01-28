@@ -462,7 +462,7 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
                 // Forward: show Spanish, expect English
                 wordEl.textContent = isReverseVocab ? item.translation : item.word;
                 inputEl.value = '';
-                inputEl.placeholder = isReverseVocab ? 'Spanish...' : 'English...';
+                inputEl.placeholder = isReverseVocab ? 'Translate to Spanish' : 'Translate to English';
                 resultEl.textContent = '';
             }
         }
