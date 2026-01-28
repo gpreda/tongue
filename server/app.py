@@ -40,6 +40,7 @@ class TranslationRequest(BaseModel):
     hint_used: bool = False
     hint_words: list[str] = []
     selected_tense: Optional[str] = None  # For verb challenges
+    translations: list[str] = []  # For multi-word vocab challenges (4 answers)
 
 
 class HintRequest(BaseModel):
@@ -81,6 +82,7 @@ class TranslationResponse(BaseModel):
     level_changed: bool
     new_level: int
     change_type: Optional[str]
+    word_results: Optional[list] = None  # Per-word results for multi-word vocab challenges
 
 
 class HintResponse(BaseModel):
@@ -515,7 +517,27 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                         'type': info['type'],
                         'translation': info['translation']
                     }
-            # Check if this was a vocab challenge (sentence starts with "VOCAB:")
+            # Check if this was a multi-word vocab challenge
+            elif last_round.sentence.startswith("VOCAB4:") or last_round.sentence.startswith("VOCAB4R:"):
+                is_vocab_challenge = True
+                is_reverse = last_round.sentence.startswith("VOCAB4R:")
+                prefix = "VOCAB4R:" if is_reverse else "VOCAB4:"
+                rest = last_round.sentence[len(prefix):]
+                parts = rest.split(":", 1)
+                if len(parts) == 2:
+                    from core.vocabulary import get_category_name, get_category_items
+                    category = parts[0]
+                    word_list = parts[1].split(",")
+                    items = get_category_items(category)
+                    words = [{'word': w, 'translation': items.get(w, '')} for w in word_list]
+                    vocab_challenge = {
+                        'words': words,
+                        'category': category,
+                        'category_name': get_category_name(category),
+                        'is_multi': True,
+                        'is_reverse': is_reverse
+                    }
+            # Check if this was a single-word vocab challenge (sentence starts with "VOCAB:")
             elif last_round.sentence.startswith("VOCAB:"):
                 is_vocab_challenge = True
                 # Format: VOCAB:category:word
@@ -579,11 +601,21 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             if vocab_challenge:
                 is_vocab_challenge = True
                 from core.models import TongueRound
-                # Store as VOCAB:category:word
-                current_round = TongueRound(
-                    f"VOCAB:{vocab_challenge['category']}:{vocab_challenge['word']}",
-                    history.difficulty, 0
-                )
+                if vocab_challenge.get('is_multi'):
+                    # Multi-word: store as VOCAB4:category:word1,word2,word3,word4
+                    # or VOCAB4R:category:word1,word2,word3,word4
+                    words_str = ','.join(w['word'] for w in vocab_challenge['words'])
+                    prefix = 'VOCAB4R' if vocab_challenge.get('is_reverse') else 'VOCAB4'
+                    current_round = TongueRound(
+                        f"{prefix}:{vocab_challenge['category']}:{words_str}",
+                        history.difficulty, 0
+                    )
+                else:
+                    # Single-word: store as VOCAB:category:word
+                    current_round = TongueRound(
+                        f"VOCAB:{vocab_challenge['category']}:{vocab_challenge['word']}",
+                        history.difficulty, 0
+                    )
                 history.rounds.append(current_round)
                 save_history(user_id)
 
@@ -647,6 +679,12 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         if prev_sentence.startswith("WORD:"):
             prev_challenge_type = 'word'
             prev_sentence = prev_sentence[5:]  # Remove WORD: prefix
+        elif prev_sentence.startswith("VOCAB4R:") or prev_sentence.startswith("VOCAB4:"):
+            prev_challenge_type = 'vocab'
+            prefix = "VOCAB4R:" if prev_sentence.startswith("VOCAB4R:") else "VOCAB4:"
+            rest = prev_sentence[len(prefix):]
+            parts = rest.split(":", 1)
+            prev_sentence = parts[1] if len(parts) == 2 else prev_sentence
         elif prev_sentence.startswith("VOCAB:"):
             prev_challenge_type = 'vocab'
             parts = prev_sentence.split(":", 2)
@@ -671,6 +709,12 @@ async def _get_next_sentence_inner(user_id: str = "default"):
     sentence = round.sentence
     if is_word_challenge and sentence.startswith("WORD:"):
         sentence = sentence[5:]  # Remove prefix for display
+    elif is_vocab_challenge and (sentence.startswith("VOCAB4:") or sentence.startswith("VOCAB4R:")):
+        # Multi-word: extract comma-separated words
+        prefix = "VOCAB4R:" if sentence.startswith("VOCAB4R:") else "VOCAB4:"
+        rest = sentence[len(prefix):]
+        parts = rest.split(":", 1)
+        sentence = parts[1] if len(parts) == 2 else sentence
     elif is_vocab_challenge and sentence.startswith("VOCAB:"):
         # Extract just the word from VOCAB:category:word
         parts = sentence.split(":", 2)
@@ -736,7 +780,9 @@ async def submit_translation(request: TranslationRequest):
 
         # Handle different challenge types
         is_word_challenge = current_round.sentence.startswith("WORD:")
-        is_vocab_challenge = current_round.sentence.startswith("VOCAB:")
+        is_multi_vocab = (current_round.sentence.startswith("VOCAB4:") or
+                          current_round.sentence.startswith("VOCAB4R:"))
+        is_vocab_challenge = current_round.sentence.startswith("VOCAB:") or is_multi_vocab
         is_verb_challenge = current_round.sentence.startswith("VERB:")
 
         if is_verb_challenge:
@@ -804,8 +850,75 @@ async def submit_translation(request: TranslationRequest):
             if conjugated_form != request.sentence:
                 raise HTTPException(status_code=400, detail="Sentence mismatch")
 
+        elif is_multi_vocab:
+            # Multi-word vocabulary challenge (4 words)
+            is_reverse = current_round.sentence.startswith("VOCAB4R:")
+            prefix = "VOCAB4R:" if is_reverse else "VOCAB4:"
+            rest = current_round.sentence[len(prefix):]
+            parts = rest.split(":", 1)
+            if len(parts) != 2:
+                raise HTTPException(status_code=400, detail="Invalid multi-vocab challenge format")
+
+            category = parts[0]
+            word_list = parts[1].split(",")
+            logger.info(f"Multi-vocab challenge: category={category}, words={word_list}, reverse={is_reverse}")
+
+            from core.vocabulary import get_category_items
+            items = get_category_items(category)
+
+            # Score each word (25 points each)
+            word_results = []
+            total_score = 0
+            translations = request.translations or []
+
+            for i, word in enumerate(word_list):
+                student_answer = translations[i].strip() if i < len(translations) else ''
+                correct_translation = items.get(word, '')
+
+                if is_reverse:
+                    # Reverse: English shown, user types Spanish word
+                    # Case-insensitive but accent-sensitive
+                    is_correct = student_answer.lower() == word.lower()
+                    word_results.append({
+                        'word': correct_translation,  # English shown
+                        'correct_answer': word,  # Spanish expected
+                        'student_answer': student_answer,
+                        'is_correct': is_correct
+                    })
+                else:
+                    # Forward: Spanish shown, user types English translation
+                    correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+                    is_correct = student_answer.lower() in correct_answers
+                    word_results.append({
+                        'word': word,  # Spanish shown
+                        'correct_answer': correct_translation,
+                        'student_answer': student_answer,
+                        'is_correct': is_correct
+                    })
+
+                if is_correct:
+                    total_score += 25
+
+                # Record per-word vocab progress
+                history.record_vocab_result(category, word, is_correct)
+
+            all_correct = total_score == 100
+            correct_str = ', '.join(f"{w['word']}={w['correct_answer']}" for w in word_results if not w['is_correct'])
+            if all_correct:
+                evaluation = 'All correct!'
+            else:
+                evaluation = f'Incorrect: {correct_str}'
+
+            judgement = {
+                'score': total_score,
+                'correct_translation': ', '.join(items.get(w, '') for w in word_list),
+                'evaluation': evaluation,
+                'vocabulary_breakdown': [[w, items.get(w, ''), category, word_results[i]['is_correct']] for i, w in enumerate(word_list)]
+            }
+            judge_ms = 0
+
         elif is_vocab_challenge:
-            # Vocabulary category challenge: simple matching
+            # Single-word vocabulary category challenge: simple matching
             # Format: VOCAB:category:word
             parts = current_round.sentence.split(":", 2)
             if len(parts) != 3:
@@ -942,7 +1055,7 @@ async def submit_translation(request: TranslationRequest):
                       correct_translation=judgement.get('correct_translation', ''),
                       ms=judge_ms)
 
-            return TranslationResponse(
+            response = TranslationResponse(
                 score=current_round.get_score(),
                 correct_translation=judgement.get('correct_translation', ''),
                 evaluation=judgement.get('evaluation', ''),
@@ -952,6 +1065,12 @@ async def submit_translation(request: TranslationRequest):
                 new_level=history.difficulty,
                 change_type=None
             )
+
+            # Include per-word results for multi-word vocab challenges
+            if is_multi_vocab:
+                response.word_results = word_results
+
+            return response
 
         # Regular sentences affect level progress
         level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words, request.hint_used)

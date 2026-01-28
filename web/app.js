@@ -12,6 +12,9 @@ let hintWords = [];  // Words that were given as hints
 let isWordChallenge = false;  // Track if current task is a word challenge
 let isVocabChallenge = false;  // Track if current task is a vocab challenge
 let isVerbChallenge = false;  // Track if current task is a verb challenge
+let isMultiVocab = false;     // Track if current task is a multi-word vocab challenge
+let isReverseVocab = false;   // Track if current task is reverse direction
+let multiVocabWords = [];     // Array of {word, translation} for multi-word challenges
 
 // Cookie helpers
 function setCookie(name, value, days = 365) {
@@ -83,6 +86,8 @@ const elements = {
     wordType: document.getElementById('word-type'),
     vocabChallengeNotice: document.getElementById('vocab-challenge-notice'),
     vocabCategory: document.getElementById('vocab-category'),
+    vocabDirection: document.getElementById('vocab-direction'),
+    multiVocabInputs: document.getElementById('multi-vocab-inputs'),
     verbChallengeNotice: document.getElementById('verb-challenge-notice'),
     tenseSelectRow: document.getElementById('tense-select-row'),
     tenseSelect: document.getElementById('tense-select'),
@@ -226,7 +231,7 @@ async function getNextSentence() {
     return api(`/api/next?user_id=${encodeURIComponent(currentUser)}`);
 }
 
-async function submitTranslation(sentence, translation, selectedTense = null) {
+async function submitTranslation(sentence, translation, selectedTense = null, translations = []) {
     return api('/api/translate', {
         method: 'POST',
         body: JSON.stringify({
@@ -235,7 +240,8 @@ async function submitTranslation(sentence, translation, selectedTense = null) {
             user_id: currentUser,
             hint_used: hintUsed,
             hint_words: hintWords,
-            selected_tense: selectedTense
+            selected_tense: selectedTense,
+            translations
         })
     });
 }
@@ -384,17 +390,24 @@ function showPreviousEvaluation(eval_data) {
     }
 }
 
-function showCurrentTask(sentence, isReview = false, isWordChallenge = false, challengeWord = null, isVocabChallenge = false, vocabChallenge = null, isVerbChallenge = false, verbChallenge = null) {
+function showCurrentTask(sentence, isReview = false, isWordChal = false, challengeWord = null, isVocabChal = false, vocabChallenge = null, isVerbChal = false, verbChallenge = null) {
     elements.loading.classList.add('hidden');
     elements.currentTask.classList.remove('hidden');
     elements.validationResult.classList.add('hidden');
-    elements.currentSentence.textContent = sentence;
     elements.translationInput.value = '';
-    elements.translationInput.focus();
     elements.hintDisplay.classList.add('hidden');
     elements.submitBtn.disabled = false;
     hintUsed = false;  // Reset hint usage for new sentence
     hintWords = [];    // Reset hint words for new sentence
+
+    // Reset multi-word state
+    isMultiVocab = false;
+    isReverseVocab = false;
+    multiVocabWords = [];
+    elements.multiVocabInputs.classList.add('hidden');
+    elements.translationInput.classList.remove('hidden');
+    elements.currentSentence.classList.remove('hidden');
+    elements.vocabDirection.textContent = '';
 
     // Show review notice if this is a review sentence
     if (isReview) {
@@ -412,27 +425,71 @@ function showCurrentTask(sentence, isReview = false, isWordChallenge = false, ch
     elements.currentSentence.classList.remove('word-challenge');
 
     // Show appropriate challenge notice
-    if (isVerbChallenge && verbChallenge) {
+    if (isVerbChal && verbChallenge) {
         elements.verbChallengeNotice.classList.remove('hidden');
         elements.tenseSelectRow.classList.remove('hidden');
         elements.taskPrompt.textContent = 'Translate this verb:';
+        elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
-        elements.hintBtn.classList.add('hidden');  // No hints for verb challenges
-    } else if (isVocabChallenge && vocabChallenge) {
+        elements.hintBtn.classList.add('hidden');
+        elements.translationInput.focus();
+    } else if (isVocabChal && vocabChallenge && vocabChallenge.is_multi) {
+        // Multi-word vocab challenge
+        isMultiVocab = true;
+        isReverseVocab = vocabChallenge.is_reverse || false;
+        multiVocabWords = vocabChallenge.words;
+
+        elements.vocabChallengeNotice.classList.remove('hidden');
+        elements.vocabCategory.textContent = vocabChallenge.category_name;
+        elements.vocabDirection.textContent = isReverseVocab ? 'EN \u2192 ES' : 'ES \u2192 EN';
+        elements.taskPrompt.textContent = isReverseVocab
+            ? 'Type the Spanish word for each:'
+            : 'Translate each word:';
+        elements.currentSentence.classList.add('hidden');
+        elements.translationInput.classList.add('hidden');
+        elements.hintBtn.classList.add('hidden');
+
+        // Show multi-word inputs
+        elements.multiVocabInputs.classList.remove('hidden');
+        for (let i = 0; i < 4; i++) {
+            const wordEl = document.getElementById(`multi-word-${i}`);
+            const inputEl = document.getElementById(`multi-input-${i}`);
+            const resultEl = document.getElementById(`multi-result-${i}`);
+
+            if (i < multiVocabWords.length) {
+                const item = multiVocabWords[i];
+                // Reverse: show English, expect Spanish
+                // Forward: show Spanish, expect English
+                wordEl.textContent = isReverseVocab ? item.translation : item.word;
+                inputEl.value = '';
+                inputEl.placeholder = isReverseVocab ? 'Spanish...' : 'English...';
+                resultEl.textContent = '';
+            }
+        }
+        // Focus first input
+        document.getElementById('multi-input-0').focus();
+    } else if (isVocabChal && vocabChallenge) {
+        // Single-word vocab challenge
         elements.vocabChallengeNotice.classList.remove('hidden');
         elements.vocabCategory.textContent = vocabChallenge.category_name;
         elements.taskPrompt.textContent = 'Translate this word:';
+        elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
-        elements.hintBtn.classList.add('hidden');  // No hints for vocab challenges
-    } else if (isWordChallenge && challengeWord) {
+        elements.hintBtn.classList.add('hidden');
+        elements.translationInput.focus();
+    } else if (isWordChal && challengeWord) {
         elements.wordChallengeNotice.classList.remove('hidden');
         elements.wordType.textContent = challengeWord.type;
         elements.taskPrompt.textContent = 'Translate this word:';
+        elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
-        elements.hintBtn.classList.add('hidden');  // No hints for word challenges
+        elements.hintBtn.classList.add('hidden');
+        elements.translationInput.focus();
     } else {
         elements.taskPrompt.textContent = 'Translate this sentence:';
+        elements.currentSentence.textContent = sentence;
         elements.hintBtn.classList.remove('hidden');
+        elements.translationInput.focus();
     }
 }
 
@@ -461,6 +518,39 @@ function showValidationResult(result, studentTranslation) {
         elements.resultReasonRow.classList.add('hidden');
     }
 
+    // Per-word results for multi-word challenges
+    const existingGrid = document.querySelector('.multi-result-grid');
+    if (existingGrid) existingGrid.remove();
+
+    if (result.word_results && result.word_results.length > 0) {
+        const grid = document.createElement('div');
+        grid.className = 'multi-result-grid';
+
+        result.word_results.forEach(wr => {
+            const item = document.createElement('div');
+            item.className = `multi-result-item ${wr.is_correct ? 'correct' : 'incorrect'}`;
+
+            const icon = wr.is_correct ? '\u2713' : '\u2717';
+            const iconColor = wr.is_correct ? '#2ecc71' : '#e74c3c';
+
+            let html = `<span class="multi-result-icon" style="color:${iconColor}">${icon}</span>`;
+            html += `<span class="multi-result-word">${wr.word}</span>`;
+            html += `<span class="multi-result-answer">${wr.student_answer || '(empty)'}</span>`;
+            if (!wr.is_correct) {
+                html += `<span class="multi-result-correct">\u2192 ${wr.correct_answer}</span>`;
+            }
+
+            item.innerHTML = html;
+            grid.appendChild(item);
+        });
+
+        // Insert after the score display
+        const resultContent = elements.validationResult.querySelector('.result-content');
+        if (resultContent) {
+            resultContent.appendChild(grid);
+        }
+    }
+
     // Level change
     if (result.level_changed) {
         elements.levelChange.classList.remove('hidden');
@@ -475,10 +565,11 @@ function showValidationResult(result, studentTranslation) {
         elements.levelChange.classList.add('hidden');
     }
 
-    // Auto-advance after delay
+    // Auto-advance after delay (longer for multi-word to read results)
+    const delay = result.word_results ? 5000 : 3000;
     setTimeout(() => {
         loadNextSentence();
-    }, 3000);
+    }, delay);
 }
 
 async function showStatusModal() {
@@ -604,10 +695,27 @@ async function loadNextSentence() {
 async function handleSubmit(e) {
     e.preventDefault();
 
-    const translation = elements.translationInput.value.trim();
-    if (!translation) {
-        elements.translationInput.focus();
-        return;
+    let translation = '';
+    let translations = [];
+
+    if (isMultiVocab) {
+        // Collect all 4 inputs
+        for (let i = 0; i < 4; i++) {
+            const input = document.getElementById(`multi-input-${i}`);
+            translations.push(input ? input.value.trim() : '');
+        }
+        // Check at least one is filled
+        if (translations.every(t => !t)) {
+            document.getElementById('multi-input-0').focus();
+            return;
+        }
+        translation = translations.join(', ');
+    } else {
+        translation = elements.translationInput.value.trim();
+        if (!translation) {
+            elements.translationInput.focus();
+            return;
+        }
     }
 
     // For verb challenges, require tense selection
@@ -625,7 +733,7 @@ async function handleSubmit(e) {
     elements.submitBtn.textContent = 'Validating...';
 
     try {
-        const result = await submitTranslation(currentSentence, translation, selectedTense);
+        const result = await submitTranslation(currentSentence, translation, selectedTense, translations);
 
         // Update status bar
         const status = await getStatus();
@@ -807,6 +915,25 @@ elements.statusBtn.addEventListener('click', () => { closeMenu(); showStatusModa
 elements.masteredBtn.addEventListener('click', () => { closeMenu(); showMasteredModal(); });
 elements.learningBtn.addEventListener('click', () => { closeMenu(); showLearningModal(); });
 elements.newGameBtn.addEventListener('click', handleNewGame);
+
+// Enter-key navigation for multi-word inputs
+for (let i = 0; i < 4; i++) {
+    const input = document.getElementById(`multi-input-${i}`);
+    if (input) {
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (i < 3) {
+                    // Move to next input
+                    document.getElementById(`multi-input-${i + 1}`).focus();
+                } else {
+                    // Last input - submit form
+                    elements.translationForm.dispatchEvent(new Event('submit', { cancelable: true }));
+                }
+            }
+        });
+    }
+}
 
 // Close menu when clicking outside
 document.addEventListener('click', (e) => {

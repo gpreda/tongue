@@ -257,7 +257,9 @@ class History:
             if review['due_at_round'] <= self.total_completed:
                 sentence = review['sentence']
                 # Skip challenge items that shouldn't be in review queue
-                if sentence.startswith('WORD:') or sentence.startswith('VOCAB:') or sentence.startswith('VERB:'):
+                if (sentence.startswith('WORD:') or sentence.startswith('VOCAB:') or
+                        sentence.startswith('VOCAB4:') or sentence.startswith('VOCAB4R:') or
+                        sentence.startswith('VERB:')):
                     self.review_queue.pop(i)
                     continue
                 # Remove from queue and return this sentence
@@ -340,6 +342,8 @@ class History:
         # Don't add challenges (WORD:, VOCAB:, VERB:) to review queue
         is_challenge = (round.sentence.startswith('WORD:') or
                         round.sentence.startswith('VOCAB:') or
+                        round.sentence.startswith('VOCAB4:') or
+                        round.sentence.startswith('VOCAB4R:') or
                         round.sentence.startswith('VERB:'))
         if score <= 50 and not is_challenge:
             # Check if sentence is not already in review queue
@@ -472,9 +476,12 @@ class History:
 
     def get_vocab_challenge(self) -> dict | None:
         """Get a vocabulary challenge from a random category.
-        Returns dict with: word, translation, category, category_name
-        Prioritizes words the user hasn't mastered yet."""
-        from core.vocabulary import get_all_categories, get_random_challenge
+        For multi-word categories (day, month, season, number), returns a multi-word
+        challenge with 4 words and 50% chance of reverse direction.
+        For other categories, returns single-word challenge.
+        """
+        from core.vocabulary import (get_all_categories, get_random_challenge,
+                                     get_multi_word_challenge, MULTI_WORD_CATEGORIES)
 
         categories = get_all_categories()
         random.shuffle(categories)
@@ -483,7 +490,12 @@ class History:
             # Get words user has mastered in this category
             mastered = self._get_mastered_vocab_words(category)
 
-            challenge = get_random_challenge(category, exclude_words=mastered)
+            if category in MULTI_WORD_CATEGORIES:
+                reverse = random.random() < 0.5
+                challenge = get_multi_word_challenge(category, exclude_words=mastered, reverse=reverse)
+            else:
+                challenge = get_random_challenge(category, exclude_words=mastered)
+
             if challenge:
                 return challenge
 

@@ -63,7 +63,17 @@ VOCABULARY_CHALLENGES = {
             'diecisiete': '17,seventeen',
             'dieciocho': '18,eighteen',
             'diecinueve': '19,nineteen',
-            'veinte': '20,twenty'
+            'veinte': '20,twenty',
+            'veintiuno': '21,twenty-one',
+            'veintidós': '22,twenty-two',
+            'veintitrés': '23,twenty-three',
+            'veinticuatro': '24,twenty-four',
+            'veinticinco': '25,twenty-five',
+            'veintiséis': '26,twenty-six',
+            'veintisiete': '27,twenty-seven',
+            'veintiocho': '28,twenty-eight',
+            'veintinueve': '29,twenty-nine',
+            'treinta': '30,thirty'
         }
     },
     'color': {
@@ -177,6 +187,17 @@ VOCABULARY_CHALLENGES = {
 }
 
 
+MULTI_WORD_CATEGORIES = {'day', 'month', 'season', 'number'}
+
+# Numbers in the 10-30 range for multi-word challenges
+MULTI_WORD_NUMBER_RANGE = {
+    'diez', 'once', 'doce', 'trece', 'catorce', 'quince',
+    'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte',
+    'veintiuno', 'veintidós', 'veintitrés', 'veinticuatro', 'veinticinco',
+    'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve', 'treinta'
+}
+
+
 def get_all_categories() -> list[str]:
     """Get list of all category keys."""
     return list(VOCABULARY_CHALLENGES.keys())
@@ -215,4 +236,54 @@ def get_random_challenge(category: str, exclude_words: list[str] = None) -> dict
         'translation': items[word],
         'category': category,
         'category_name': get_category_name(category)
+    }
+
+
+def get_multi_word_number_items() -> dict:
+    """Get number items filtered to 10-30 range for multi-word challenges."""
+    items = get_category_items('number')
+    return {w: t for w, t in items.items() if w in MULTI_WORD_NUMBER_RANGE}
+
+
+def get_multi_word_challenge(category: str, exclude_words: list[str] = None, reverse: bool = False) -> dict | None:
+    """Get a multi-word challenge with 4 random words from a category.
+
+    Returns dict with: words (list of {word, translation}), category, category_name,
+                       is_multi (True), is_reverse (bool)
+    """
+    import random
+
+    if category == 'number':
+        items = get_multi_word_number_items()
+    else:
+        items = get_category_items(category)
+
+    if not items:
+        return None
+
+    exclude_words = exclude_words or []
+    available = [w for w in items.keys() if w not in exclude_words]
+
+    # For seasons (only 4 words), use all of them even if mastered
+    if category == 'season' and len(available) < 4:
+        available = list(items.keys())
+
+    if len(available) < 4:
+        # Not enough unmastered words; fill from all items
+        remaining = [w for w in items.keys() if w not in available]
+        random.shuffle(remaining)
+        available.extend(remaining[:4 - len(available)])
+
+    if len(available) < 4:
+        return None
+
+    selected = random.sample(available, 4)
+    words = [{'word': w, 'translation': items[w]} for w in selected]
+
+    return {
+        'words': words,
+        'category': category,
+        'category_name': get_category_name(category),
+        'is_multi': True,
+        'is_reverse': reverse
     }

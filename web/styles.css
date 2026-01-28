@@ -395,6 +395,106 @@ header h1 {
     opacity: 0.8;
 }
 
+.vocab-direction {
+    background: rgba(46, 204, 113, 0.3);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+}
+
+/* Multi-word vocabulary inputs */
+.multi-vocab-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.multi-vocab-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.multi-vocab-word {
+    min-width: 120px;
+    font-weight: 500;
+    color: #fff;
+    font-size: 1.1rem;
+    text-align: right;
+}
+
+.multi-vocab-input {
+    flex: 1;
+    padding: 12px;
+    font-size: 1rem;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
+    transition: border-color 0.3s;
+}
+
+.multi-vocab-input:focus {
+    outline: none;
+    border-color: #2ecc71;
+}
+
+.multi-vocab-input::placeholder {
+    color: #6c757d;
+}
+
+.multi-vocab-result {
+    min-width: 24px;
+    font-size: 1.2rem;
+    text-align: center;
+}
+
+/* Multi-word result grid */
+.multi-result-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 15px 0;
+}
+
+.multi-result-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.95rem;
+}
+
+.multi-result-item.correct {
+    background: rgba(46, 204, 113, 0.15);
+}
+
+.multi-result-item.incorrect {
+    background: rgba(231, 76, 60, 0.15);
+}
+
+.multi-result-icon {
+    font-size: 1.1rem;
+    min-width: 20px;
+}
+
+.multi-result-word {
+    font-weight: 500;
+    color: #fff;
+    min-width: 100px;
+}
+
+.multi-result-answer {
+    color: #8892b0;
+}
+
+.multi-result-correct {
+    color: #2ecc71;
+    margin-left: auto;
+}
+
 .tense-select-row {
     display: flex;
     align-items: center;
@@ -917,5 +1017,20 @@ header h1 {
 
     .btn-primary, .btn-secondary {
         width: 100%;
+    }
+
+    .multi-vocab-row {
+        flex-wrap: wrap;
+    }
+
+    .multi-vocab-word {
+        min-width: 100%;
+        text-align: left;
+        margin-bottom: 2px;
+    }
+
+    .multi-vocab-input {
+        flex: 1;
+        min-width: 0;
     }
 }
