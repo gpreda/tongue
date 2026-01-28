@@ -162,7 +162,15 @@ def log_event(event: str, user_id: str, **data) -> None:
         history = user_histories.get(user_id)
         difficulty = history.difficulty if history else None
         session_id = get_session_id(user_id)
-        storage.log_event(event, user_id, session_id, difficulty, **data)
+        # Extract AI-related fields so they go into dedicated columns
+        ai_used = data.pop('ai_used', False)
+        model_name = data.pop('model_name', None)
+        model_tokens = data.pop('model_tokens', None)
+        model_ms = data.pop('model_ms', None)
+        storage.log_event(event, user_id, session_id, difficulty,
+                          ai_used=ai_used, model_name=model_name,
+                          model_tokens=model_tokens, model_ms=model_ms,
+                          **data)
 
 
 app = FastAPI(title="Tongue API", description="Spanish translation practice API")
@@ -447,11 +455,15 @@ async def get_story(user_id: str = "default", force_new: bool = False):
         save_history(user_id)
 
         # Log story generation
+        story_ai = story_provider.get_last_call_info()
         log_event('story.generate', user_id,
                   from_cache=from_cache,
                   ms=ms,
                   sentence_count=len(history.story_sentences),
-                  model='gemini-2.5-pro')
+                  ai_used=True,
+                  model_name=story_ai.get('model_name'),
+                  model_tokens=story_ai.get('model_tokens'),
+                  model_ms=story_ai.get('model_ms'))
 
         # Trigger background generation for next story
         trigger_background_story(user_id, history)
@@ -1082,10 +1094,15 @@ async def submit_translation(request: TranslationRequest):
                   translation=request.translation,
                   hint_used=request.hint_used,
                   hint_words=request.hint_words)
+        validate_ai = ai_provider.get_last_call_info()
         log_event('translation.result', request.user_id,
                   score=current_round.get_score(),
                   correct_translation=judgement.get('correct_translation', ''),
-                  ms=judge_ms)
+                  ms=judge_ms,
+                  ai_used=True,
+                  model_name=validate_ai.get('model_name'),
+                  model_tokens=validate_ai.get('model_tokens'),
+                  model_ms=validate_ai.get('model_ms'))
 
         # Log level change if it occurred
         if level_info['level_changed']:
@@ -1149,9 +1166,14 @@ async def _get_hint_inner(request: HintRequest):
             words_revealed.append(hint['verb'][0])
         if hint.get('adjective'):
             words_revealed.append(hint['adjective'][0])
+    hint_ai = ai_provider.get_last_call_info()
     log_event('hint.request', request.user_id,
               sentence=request.sentence,
-              words_revealed=words_revealed)
+              words_revealed=words_revealed,
+              ai_used=True,
+              model_name=hint_ai.get('model_name'),
+              model_tokens=hint_ai.get('model_tokens'),
+              model_ms=hint_ai.get('model_ms'))
 
     if not hint:
         return HintResponse(noun=None, verb=None, adjective=None)

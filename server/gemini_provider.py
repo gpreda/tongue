@@ -51,8 +51,17 @@ class GeminiProvider(AIProvider):
         else:
             self.stats = default_stats
 
+    def get_last_call_info(self) -> dict:
+        """Get metadata from the most recent AI call."""
+        return self._last_call_info.copy() if hasattr(self, '_last_call_info') else {}
+
     def _record_stats(self, call_type: str, ms: int, token_stats: dict) -> None:
         """Record stats for a call type and persist to storage."""
+        self._last_call_info = {
+            'model_name': self.model_name,
+            'model_ms': ms,
+            'model_tokens': token_stats.get('total_tokens', 0),
+        }
         if call_type not in self.stats:
             self.stats[call_type] = {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
         self.stats[call_type]['calls'] += 1
