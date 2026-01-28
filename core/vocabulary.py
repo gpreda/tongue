@@ -1,5 +1,7 @@
 """Static vocabulary challenges for common categories."""
 
+import random
+
 # Spanish to English vocabulary by category
 VOCABULARY_CHALLENGES = {
     'month': {
@@ -186,6 +188,8 @@ VOCABULARY_CHALLENGES = {
     }
 }
 
+# Category display names (challenge behavior config, not vocabulary data)
+CATEGORY_DISPLAY_NAMES = {cat: data['name'] for cat, data in VOCABULARY_CHALLENGES.items()}
 
 MULTI_WORD_CATEGORIES = {'day', 'month', 'season', 'number'}
 
@@ -197,80 +201,155 @@ MULTI_WORD_NUMBER_RANGE = {
     'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve', 'treinta'
 }
 
+# Module-level storage for DB-backed vocabulary
+_storage = None
 
-def get_all_categories() -> list[str]:
+
+def _english_key(alternatives: str) -> str:
+    """Extract the canonical English key (first comma-separated value)."""
+    return alternatives.split(',')[0].strip()
+
+
+def get_seed_data(language: str = 'es') -> list[dict]:
+    """Generate seed data from static VOCABULARY_CHALLENGES dict.
+
+    Returns list of {category, english, word, language, alternatives} dicts.
+    English key = first comma-separated value from the alternatives string.
+    """
+    items = []
+    for category, data in VOCABULARY_CHALLENGES.items():
+        for word, alternatives in data['items'].items():
+            english = _english_key(alternatives)
+            items.append({
+                'category': category,
+                'english': english,
+                'word': word,
+                'language': language,
+                'alternatives': alternatives
+            })
+    return items
+
+
+def init_storage(storage) -> None:
+    """Set the storage backend for DB-backed vocabulary lookups."""
+    global _storage
+    _storage = storage
+
+
+def get_all_categories(language: str = 'es') -> list[str]:
     """Get list of all category keys."""
+    if _storage:
+        try:
+            cats = _storage.get_vocab_categories(language)
+            if cats:
+                return cats
+        except Exception:
+            pass
     return list(VOCABULARY_CHALLENGES.keys())
 
 
 def get_category_name(category: str) -> str:
     """Get display name for a category."""
-    return VOCABULARY_CHALLENGES.get(category, {}).get('name', category)
+    return CATEGORY_DISPLAY_NAMES.get(category, category)
 
 
-def get_category_items(category: str) -> dict:
-    """Get items for a category."""
+def get_category_items(category: str, language: str = 'es') -> dict:
+    """Get items for a category.
+
+    Returns {spanish_word: english_alternatives} dict for backward compatibility.
+    When storage is set, queries DB; otherwise falls back to static dict.
+    """
+    if _storage:
+        try:
+            db_items = _storage.get_vocab_category_items(category, language)
+            if db_items:
+                return {item['word']: item['alternatives'] for item in db_items}
+        except Exception:
+            pass
     return VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+
+
+def get_category_items_with_english(category: str, language: str = 'es') -> list[dict]:
+    """Get items for a category with english keys included.
+
+    Returns list of {english, word, alternatives} dicts.
+    """
+    if _storage:
+        try:
+            db_items = _storage.get_vocab_category_items(category, language)
+            if db_items:
+                return db_items
+        except Exception:
+            pass
+    # Fallback to static dict
+    data = VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+    return [
+        {'english': _english_key(alt), 'word': word, 'alternatives': alt}
+        for word, alt in data.items()
+    ]
 
 
 def get_random_challenge(category: str, exclude_words: list[str] = None) -> dict | None:
     """Get a random word from a category.
 
-    Returns dict with: word, translation, category, category_name
+    Returns dict with: word, translation, english, category, category_name
+    exclude_words is a list of english keys to exclude.
     """
-    import random
-
-    items = get_category_items(category)
-    if not items:
+    items_list = get_category_items_with_english(category)
+    if not items_list:
         return None
 
     exclude_words = exclude_words or []
-    available = [w for w in items.keys() if w not in exclude_words]
+    available = [item for item in items_list if item['english'] not in exclude_words]
 
     if not available:
         return None
 
-    word = random.choice(available)
+    item = random.choice(available)
     return {
-        'word': word,
-        'translation': items[word],
+        'word': item['word'],
+        'translation': item['alternatives'],
+        'english': item['english'],
         'category': category,
         'category_name': get_category_name(category)
     }
 
 
-def get_multi_word_number_items() -> dict:
-    """Get number items filtered to 10-30 range for multi-word challenges."""
-    items = get_category_items('number')
-    return {w: t for w, t in items.items() if w in MULTI_WORD_NUMBER_RANGE}
+def get_multi_word_number_items() -> list[dict]:
+    """Get number items filtered to 10-30 range for multi-word challenges.
+
+    Returns list of {english, word, alternatives} dicts.
+    """
+    items = get_category_items_with_english('number')
+    return [item for item in items if item['word'] in MULTI_WORD_NUMBER_RANGE]
 
 
 def get_multi_word_challenge(category: str, exclude_words: list[str] = None, reverse: bool = False) -> dict | None:
     """Get a multi-word challenge with 4 random words from a category.
 
-    Returns dict with: words (list of {word, translation}), category, category_name,
+    Returns dict with: words (list of {word, translation, english}), category, category_name,
                        is_multi (True), is_reverse (bool)
+    exclude_words is a list of english keys to exclude.
     """
-    import random
-
     if category == 'number':
-        items = get_multi_word_number_items()
+        items_list = get_multi_word_number_items()
     else:
-        items = get_category_items(category)
+        items_list = get_category_items_with_english(category)
 
-    if not items:
+    if not items_list:
         return None
 
     exclude_words = exclude_words or []
-    available = [w for w in items.keys() if w not in exclude_words]
+    available = [item for item in items_list if item['english'] not in exclude_words]
 
     # For seasons (only 4 words), use all of them even if mastered
     if category == 'season' and len(available) < 4:
-        available = list(items.keys())
+        available = list(items_list)
 
     if len(available) < 4:
         # Not enough unmastered words; fill from all items
-        remaining = [w for w in items.keys() if w not in available]
+        available_english = {item['english'] for item in available}
+        remaining = [item for item in items_list if item['english'] not in available_english]
         random.shuffle(remaining)
         available.extend(remaining[:4 - len(available)])
 
@@ -278,7 +357,8 @@ def get_multi_word_challenge(category: str, exclude_words: list[str] = None, rev
         return None
 
     selected = random.sample(available, 4)
-    words = [{'word': w, 'translation': items[w]} for w in selected]
+    words = [{'word': item['word'], 'translation': item['alternatives'], 'english': item['english']}
+             for item in selected]
 
     return {
         'words': words,

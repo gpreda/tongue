@@ -69,8 +69,9 @@ class History:
         self.last_evaluated_round = None
         self.last_level_changed = False
         self.review_queue = []  # Sentences to review: [{sentence, difficulty, due_at_round}]
-        # Vocabulary challenge progress: {category: {word: {correct: int, incorrect: int}}}
+        # Vocabulary challenge progress: {category: {english_key: {correct: int, incorrect: int}}}
         self.vocab_progress = {}
+        self.vocab_progress_version = 2  # Version 2 = english keys
         # Challenge stats (separate from level progress)
         self.challenge_stats = {
             'word': {'correct': 0, 'incorrect': 0},
@@ -93,6 +94,7 @@ class History:
             'story_generate_ms': self.story_generate_ms,
             'review_queue': self.review_queue,
             'vocab_progress': self.vocab_progress,
+            'vocab_progress_version': self.vocab_progress_version,
             'challenge_stats': self.challenge_stats
         }
 
@@ -124,6 +126,11 @@ class History:
         history.story_generate_ms = data.get('story_generate_ms', 0)
         history.review_queue = data.get('review_queue', [])
         history.vocab_progress = data.get('vocab_progress', {})
+        history.vocab_progress_version = data.get('vocab_progress_version', 1)
+        # Migrate vocab_progress keys from Spanish to English if needed
+        if history.vocab_progress_version < 2 and history.vocab_progress:
+            history._migrate_vocab_progress_keys()
+            history.vocab_progress_version = 2
         history.challenge_stats = data.get('challenge_stats', {
             'word': {'correct': 0, 'incorrect': 0},
             'vocab': {'correct': 0, 'incorrect': 0},
@@ -156,6 +163,29 @@ class History:
                     'correct_count': 0,
                     'incorrect_count': info.get('count', 1)
                 }
+
+    def _migrate_vocab_progress_keys(self) -> None:
+        """Migrate vocab_progress from Spanish word keys to English keys.
+
+        Old format: {category: {spanish_word: {correct, incorrect}}}
+        New format: {category: {english_key: {correct, incorrect}}}
+        """
+        from core.vocabulary import VOCABULARY_CHALLENGES
+
+        new_progress = {}
+        for category, words in self.vocab_progress.items():
+            cat_data = VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+            new_progress[category] = {}
+            for old_key, stats in words.items():
+                # old_key is a Spanish word — look up its English translation
+                alternatives = cat_data.get(old_key)
+                if alternatives:
+                    english_key = alternatives.split(',')[0].strip()
+                    new_progress[category][english_key] = stats
+                else:
+                    # If we can't find it, keep the old key (it might already be English)
+                    new_progress[category][old_key] = stats
+        self.vocab_progress = new_progress
 
     def record_score(self, difficulty: int, score: int, credit: float = 1.0) -> None:
         """Record a score for advancement tracking.
@@ -502,32 +532,32 @@ class History:
         return None
 
     def _get_mastered_vocab_words(self, category: str) -> list[str]:
-        """Get list of words user has mastered in a category (>=2 correct, >=80% rate)."""
+        """Get list of english keys user has mastered in a category (>=2 correct, >=80% rate)."""
         mastered = []
         if category not in self.vocab_progress:
             return mastered
 
-        for word, stats in self.vocab_progress[category].items():
+        for english_key, stats in self.vocab_progress[category].items():
             correct = stats.get('correct', 0)
             incorrect = stats.get('incorrect', 0)
             total = correct + incorrect
             if total >= 2 and correct / total >= 0.8:
-                mastered.append(word)
+                mastered.append(english_key)
 
         return mastered
 
-    def record_vocab_result(self, category: str, word: str, is_correct: bool) -> None:
-        """Record result of a vocabulary challenge."""
+    def record_vocab_result(self, category: str, english_key: str, is_correct: bool) -> None:
+        """Record result of a vocabulary challenge by english key."""
         if category not in self.vocab_progress:
             self.vocab_progress[category] = {}
 
-        if word not in self.vocab_progress[category]:
-            self.vocab_progress[category][word] = {'correct': 0, 'incorrect': 0}
+        if english_key not in self.vocab_progress[category]:
+            self.vocab_progress[category][english_key] = {'correct': 0, 'incorrect': 0}
 
         if is_correct:
-            self.vocab_progress[category][word]['correct'] += 1
+            self.vocab_progress[category][english_key]['correct'] += 1
         else:
-            self.vocab_progress[category][word]['incorrect'] += 1
+            self.vocab_progress[category][english_key]['incorrect'] += 1
 
     def is_verb_challenge_turn(self) -> bool:
         """Check if this turn should be a verb challenge."""

@@ -179,6 +179,25 @@ class PostgresStorage(Storage):
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Vocabulary items table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS vocabulary_items (
+                    category     VARCHAR(50)  NOT NULL,
+                    english      VARCHAR(100) NOT NULL,
+                    word         VARCHAR(100) NOT NULL,
+                    language     VARCHAR(10)  NOT NULL DEFAULT 'es',
+                    alternatives VARCHAR(500),
+                    PRIMARY KEY (category, english, language)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_vocab_word
+                ON vocabulary_items (word, language)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_vocab_category
+                ON vocabulary_items (category, language)
+            """)
         self._conn.commit()
 
     def close(self):
@@ -670,3 +689,71 @@ class PostgresStorage(Storage):
         except Exception as e:
             print(f"Error saving API stats: {e}")
             self.conn.rollback()
+
+    # Vocabulary storage methods
+
+    def seed_vocabulary(self, items: list[dict]) -> None:
+        """Seed vocabulary items into the database if the table is empty."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM vocabulary_items")
+                count = cur.fetchone()[0]
+                if count > 0:
+                    return  # Already seeded
+
+                for item in items:
+                    cur.execute("""
+                        INSERT INTO vocabulary_items (category, english, word, language, alternatives)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (category, english, language) DO NOTHING
+                    """, (item['category'], item['english'], item['word'],
+                          item['language'], item['alternatives']))
+            self.conn.commit()
+            print(f"Seeded {len(items)} vocabulary items")
+        except Exception as e:
+            print(f"Error seeding vocabulary: {e}")
+            self.conn.rollback()
+
+    def get_vocab_categories(self, language: str = 'es') -> list[str]:
+        """Get distinct vocabulary categories."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT category FROM vocabulary_items WHERE language = %s ORDER BY category",
+                    (language,)
+                )
+                return [row[0] for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error getting vocab categories: {e}")
+            return []
+
+    def get_vocab_category_items(self, category: str, language: str = 'es') -> list[dict]:
+        """Get vocabulary items for a category."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT english, word, alternatives
+                       FROM vocabulary_items
+                       WHERE category = %s AND language = %s""",
+                    (category, language)
+                )
+                return [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error getting vocab category items: {e}")
+            return []
+
+    def get_vocab_item_by_english(self, category: str, english: str, language: str = 'es') -> dict | None:
+        """Look up a single vocabulary item by category and english key."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT english, word, alternatives
+                       FROM vocabulary_items
+                       WHERE category = %s AND english = %s AND language = %s""",
+                    (category, english, language)
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            print(f"Error getting vocab item by english: {e}")
+            return None

@@ -319,6 +319,12 @@ async def startup():
     story_provider = GeminiProvider(api_key, model_name='gemini-2.5-pro', storage=storage)
     print("AI providers initialized: gemini-2.0-flash (validation), gemini-2.5-pro (stories)")
 
+    # Initialize vocabulary storage and seed DB
+    from core.vocabulary import init_storage as vocab_init_storage, get_seed_data
+    vocab_init_storage(storage)
+    storage.seed_vocabulary(get_seed_data())
+    print("Vocabulary storage initialized and seeded")
+
 
 @app.get("/")
 async def root():
@@ -537,11 +543,17 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 rest = last_round.sentence[len(prefix):]
                 parts = rest.split(":", 1)
                 if len(parts) == 2:
-                    from core.vocabulary import get_category_name, get_category_items
+                    from core.vocabulary import get_category_name
                     category = parts[0]
-                    word_list = parts[1].split(",")
-                    items = get_category_items(category)
-                    words = [{'word': w, 'translation': items.get(w, '')} for w in word_list]
+                    english_keys = parts[1].split(",")
+                    # Look up each english key to get word/alternatives
+                    words = []
+                    for eng_key in english_keys:
+                        item = storage.get_vocab_item_by_english(category, eng_key)
+                        if item:
+                            words.append({'word': item['word'], 'translation': item['alternatives'], 'english': item['english']})
+                        else:
+                            words.append({'word': eng_key, 'translation': eng_key, 'english': eng_key})
                     vocab_challenge = {
                         'words': words,
                         'category': category,
@@ -552,19 +564,29 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             # Check if this was a single-word vocab challenge (sentence starts with "VOCAB:")
             elif last_round.sentence.startswith("VOCAB:"):
                 is_vocab_challenge = True
-                # Format: VOCAB:category:word
+                # Format: VOCAB:category:english_key
                 parts = last_round.sentence.split(":", 2)
                 if len(parts) == 3:
-                    from core.vocabulary import get_category_name, get_category_items
+                    from core.vocabulary import get_category_name
                     category = parts[1]
-                    word = parts[2]
-                    items = get_category_items(category)
-                    vocab_challenge = {
-                        'word': word,
-                        'translation': items.get(word, ''),
-                        'category': category,
-                        'category_name': get_category_name(category)
-                    }
+                    english_key = parts[2]
+                    item = storage.get_vocab_item_by_english(category, english_key)
+                    if item:
+                        vocab_challenge = {
+                            'word': item['word'],
+                            'translation': item['alternatives'],
+                            'english': item['english'],
+                            'category': category,
+                            'category_name': get_category_name(category)
+                        }
+                    else:
+                        vocab_challenge = {
+                            'word': english_key,
+                            'translation': english_key,
+                            'english': english_key,
+                            'category': category,
+                            'category_name': get_category_name(category)
+                        }
             # Check if this was a verb challenge (sentence starts with "VERB:")
             elif last_round.sentence.startswith("VERB:"):
                 is_verb_challenge = True
@@ -614,18 +636,18 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 is_vocab_challenge = True
                 from core.models import TongueRound
                 if vocab_challenge.get('is_multi'):
-                    # Multi-word: store as VOCAB4:category:word1,word2,word3,word4
-                    # or VOCAB4R:category:word1,word2,word3,word4
-                    words_str = ','.join(w['word'] for w in vocab_challenge['words'])
+                    # Multi-word: store as VOCAB4:category:eng1,eng2,eng3,eng4
+                    # or VOCAB4R:category:eng1,eng2,eng3,eng4
+                    words_str = ','.join(w['english'] for w in vocab_challenge['words'])
                     prefix = 'VOCAB4R' if vocab_challenge.get('is_reverse') else 'VOCAB4'
                     current_round = TongueRound(
                         f"{prefix}:{vocab_challenge['category']}:{words_str}",
                         history.difficulty, 0
                     )
                 else:
-                    # Single-word: store as VOCAB:category:word
+                    # Single-word: store as VOCAB:category:english_key
                     current_round = TongueRound(
-                        f"VOCAB:{vocab_challenge['category']}:{vocab_challenge['word']}",
+                        f"VOCAB:{vocab_challenge['category']}:{vocab_challenge['english']}",
                         history.difficulty, 0
                     )
                 history.rounds.append(current_round)
@@ -696,11 +718,25 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             prefix = "VOCAB4R:" if prev_sentence.startswith("VOCAB4R:") else "VOCAB4:"
             rest = prev_sentence[len(prefix):]
             parts = rest.split(":", 1)
-            prev_sentence = parts[1] if len(parts) == 2 else prev_sentence
+            if len(parts) == 2:
+                # Look up Spanish words from english keys for display
+                eng_keys = parts[1].split(",")
+                spanish_words = []
+                for ek in eng_keys:
+                    item = storage.get_vocab_item_by_english(parts[0], ek)
+                    spanish_words.append(item['word'] if item else ek)
+                prev_sentence = ', '.join(spanish_words)
+            else:
+                prev_sentence = prev_sentence
         elif prev_sentence.startswith("VOCAB:"):
             prev_challenge_type = 'vocab'
             parts = prev_sentence.split(":", 2)
-            prev_sentence = parts[2] if len(parts) == 3 else prev_sentence
+            if len(parts) == 3:
+                # Look up Spanish word from english key for display
+                item = storage.get_vocab_item_by_english(parts[1], parts[2])
+                prev_sentence = item['word'] if item else parts[2]
+            else:
+                prev_sentence = prev_sentence
         elif prev_sentence.startswith("VERB:"):
             prev_challenge_type = 'verb'
             prev_sentence = prev_sentence[5:]  # Remove VERB: prefix
@@ -722,15 +758,19 @@ async def _get_next_sentence_inner(user_id: str = "default"):
     if is_word_challenge and sentence.startswith("WORD:"):
         sentence = sentence[5:]  # Remove prefix for display
     elif is_vocab_challenge and (sentence.startswith("VOCAB4:") or sentence.startswith("VOCAB4R:")):
-        # Multi-word: extract comma-separated words
+        # Multi-word: the vocab_challenge dict has words with Spanish 'word' fields
+        # sentence field isn't displayed for multi-word (UI hides it)
         prefix = "VOCAB4R:" if sentence.startswith("VOCAB4R:") else "VOCAB4:"
         rest = sentence[len(prefix):]
         parts = rest.split(":", 1)
         sentence = parts[1] if len(parts) == 2 else sentence
     elif is_vocab_challenge and sentence.startswith("VOCAB:"):
-        # Extract just the word from VOCAB:category:word
-        parts = sentence.split(":", 2)
-        sentence = parts[2] if len(parts) == 3 else sentence
+        # Single-word vocab: display the Spanish word for translation
+        if vocab_challenge:
+            sentence = vocab_challenge['word']
+        else:
+            parts = sentence.split(":", 2)
+            sentence = parts[2] if len(parts) == 3 else sentence
     elif is_verb_challenge and sentence.startswith("VERB:"):
         sentence = sentence[5:]  # Remove prefix for display
 
@@ -863,7 +903,7 @@ async def submit_translation(request: TranslationRequest):
                 raise HTTPException(status_code=400, detail="Sentence mismatch")
 
         elif is_multi_vocab:
-            # Multi-word vocabulary challenge (4 words)
+            # Multi-word vocabulary challenge (4 words, stored as english keys)
             is_reverse = current_round.sentence.startswith("VOCAB4R:")
             prefix = "VOCAB4R:" if is_reverse else "VOCAB4:"
             rest = current_round.sentence[len(prefix):]
@@ -872,38 +912,44 @@ async def submit_translation(request: TranslationRequest):
                 raise HTTPException(status_code=400, detail="Invalid multi-vocab challenge format")
 
             category = parts[0]
-            word_list = parts[1].split(",")
-            logger.info(f"Multi-vocab challenge: category={category}, words={word_list}, reverse={is_reverse}")
+            english_keys = parts[1].split(",")
+            logger.info(f"Multi-vocab challenge: category={category}, english_keys={english_keys}, reverse={is_reverse}")
 
-            from core.vocabulary import get_category_items
-            items = get_category_items(category)
+            # Look up each english key to get word/alternatives
+            vocab_items = []
+            for eng_key in english_keys:
+                item = storage.get_vocab_item_by_english(category, eng_key)
+                if item:
+                    vocab_items.append(item)
+                else:
+                    vocab_items.append({'english': eng_key, 'word': eng_key, 'alternatives': eng_key})
 
             # Score each word (25 points each)
             word_results = []
             total_score = 0
             translations = request.translations or []
 
-            for i, word in enumerate(word_list):
+            for i, item in enumerate(vocab_items):
                 student_answer = translations[i].strip() if i < len(translations) else ''
-                correct_translation = items.get(word, '')
+                spanish_word = item['word']
+                alternatives = item['alternatives']
 
                 if is_reverse:
                     # Reverse: English shown, user types Spanish word
-                    # Case-insensitive but accent-sensitive
-                    is_correct = student_answer.lower() == word.lower()
+                    is_correct = student_answer.lower() == spanish_word.lower()
                     word_results.append({
-                        'word': correct_translation,  # English shown
-                        'correct_answer': word,  # Spanish expected
+                        'word': alternatives,  # English shown
+                        'correct_answer': spanish_word,  # Spanish expected
                         'student_answer': student_answer,
                         'is_correct': is_correct
                     })
                 else:
                     # Forward: Spanish shown, user types English translation
-                    correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+                    correct_answers = [t.strip().lower() for t in alternatives.split(',')]
                     is_correct = student_answer.lower() in correct_answers
                     word_results.append({
-                        'word': word,  # Spanish shown
-                        'correct_answer': correct_translation,
+                        'word': spanish_word,  # Spanish shown
+                        'correct_answer': alternatives,
                         'student_answer': student_answer,
                         'is_correct': is_correct
                     })
@@ -911,8 +957,8 @@ async def submit_translation(request: TranslationRequest):
                 if is_correct:
                     total_score += 25
 
-                # Record per-word vocab progress
-                history.record_vocab_result(category, word, is_correct)
+                # Record per-word vocab progress by english key
+                history.record_vocab_result(category, item['english'], is_correct)
 
             all_correct = total_score == 100
             correct_str = ', '.join(f"{w['word']}={w['correct_answer']}" for w in word_results if not w['is_correct'])
@@ -923,29 +969,34 @@ async def submit_translation(request: TranslationRequest):
 
             judgement = {
                 'score': total_score,
-                'correct_translation': ', '.join(items.get(w, '') for w in word_list),
+                'correct_translation': ', '.join(item['alternatives'] for item in vocab_items),
                 'evaluation': evaluation,
-                'vocabulary_breakdown': [[w, items.get(w, ''), category, word_results[i]['is_correct']] for i, w in enumerate(word_list)]
+                'vocabulary_breakdown': [[item['word'], item['alternatives'], category, word_results[i]['is_correct']] for i, item in enumerate(vocab_items)]
             }
             judge_ms = 0
 
         elif is_vocab_challenge:
             # Single-word vocabulary category challenge: simple matching
-            # Format: VOCAB:category:word
+            # Format: VOCAB:category:english_key
             parts = current_round.sentence.split(":", 2)
             if len(parts) != 3:
                 raise HTTPException(status_code=400, detail="Invalid vocab challenge format")
 
             category = parts[1]
-            word = parts[2]
-            logger.info(f"Vocab challenge: category={category}, word={word}")
+            english_key = parts[2]
+            logger.info(f"Vocab challenge: category={category}, english_key={english_key}")
 
-            from core.vocabulary import get_category_items
-            items = get_category_items(category)
-            correct_translation = items.get(word, '')
+            # Look up the vocabulary item by english key
+            item = storage.get_vocab_item_by_english(category, english_key)
+            if item:
+                spanish_word = item['word']
+                alternatives = item['alternatives']
+            else:
+                spanish_word = english_key
+                alternatives = english_key
 
             # Parse correct answers (comma-separated)
-            correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+            correct_answers = [t.strip().lower() for t in alternatives.split(',')]
 
             # Check if translation matches (case-insensitive)
             student_answer = request.translation.strip().lower()
@@ -954,17 +1005,17 @@ async def submit_translation(request: TranslationRequest):
             score = 100 if is_correct else 0
             judgement = {
                 'score': score,
-                'correct_translation': correct_translation,
-                'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_translation}',
-                'vocabulary_breakdown': [[word, correct_translation, category, is_correct]]
+                'correct_translation': alternatives,
+                'evaluation': 'Correct!' if is_correct else f'The correct translation is: {alternatives}',
+                'vocabulary_breakdown': [[spanish_word, alternatives, category, is_correct]]
             }
             judge_ms = 0
 
-            # Record vocab challenge result
-            history.record_vocab_result(category, word, is_correct)
+            # Record vocab challenge result by english key
+            history.record_vocab_result(category, english_key, is_correct)
 
-            # Verify sentence matches
-            if word != request.sentence:
+            # Verify sentence matches (frontend sends the Spanish word as sentence)
+            if spanish_word != request.sentence:
                 raise HTTPException(status_code=400, detail="Sentence mismatch")
 
         elif is_word_challenge:

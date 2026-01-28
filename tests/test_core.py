@@ -129,6 +129,29 @@ class MockStorage(Storage):
     def save_api_stats(self, provider_name: str, stats: dict) -> None:
         self.api_stats[provider_name] = stats
 
+    def seed_vocabulary(self, items: list[dict]) -> None:
+        pass
+
+    def get_vocab_categories(self, language: str = 'es') -> list[str]:
+        from core.vocabulary import VOCABULARY_CHALLENGES
+        return list(VOCABULARY_CHALLENGES.keys())
+
+    def get_vocab_category_items(self, category: str, language: str = 'es') -> list[dict]:
+        from core.vocabulary import VOCABULARY_CHALLENGES
+        data = VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+        return [
+            {'english': alt.split(',')[0].strip(), 'word': word, 'alternatives': alt}
+            for word, alt in data.items()
+        ]
+
+    def get_vocab_item_by_english(self, category: str, english: str, language: str = 'es') -> dict | None:
+        from core.vocabulary import VOCABULARY_CHALLENGES
+        data = VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+        for word, alt in data.items():
+            if alt.split(',')[0].strip() == english:
+                return {'english': english, 'word': word, 'alternatives': alt}
+        return None
+
 
 # ============================================================================
 # Test Cases

@@ -261,3 +261,42 @@ class FileStorage(Storage):
         except Exception as e:
             print(f"Error saving API stats: {e}")
             raise
+
+    # Vocabulary storage methods (file storage uses static dict, no DB)
+
+    def seed_vocabulary(self, items: list[dict]) -> None:
+        """No-op for file storage — vocabulary lives in the static dict."""
+        pass
+
+    def get_vocab_categories(self, language: str = 'es') -> list[str]:
+        """Get distinct vocabulary categories from static dict."""
+        from core.vocabulary import VOCABULARY_CHALLENGES
+        return list(VOCABULARY_CHALLENGES.keys())
+
+    def get_vocab_category_items(self, category: str, language: str = 'es') -> list[dict]:
+        """Get vocabulary items for a category from static dict."""
+        from core.vocabulary import VOCABULARY_CHALLENGES
+        data = VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+        result = []
+        for word, alternatives in data.items():
+            english = alternatives.split(',')[0].strip()
+            result.append({
+                'english': english,
+                'word': word,
+                'alternatives': alternatives
+            })
+        return result
+
+    def get_vocab_item_by_english(self, category: str, english: str, language: str = 'es') -> dict | None:
+        """Look up a single vocabulary item by category and english key from static dict."""
+        from core.vocabulary import VOCABULARY_CHALLENGES
+        data = VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+        for word, alternatives in data.items():
+            key = alternatives.split(',')[0].strip()
+            if key == english:
+                return {
+                    'english': english,
+                    'word': word,
+                    'alternatives': alternatives
+                }
+        return None

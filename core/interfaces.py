@@ -86,3 +86,26 @@ class Storage(ABC):
     def save_api_stats(self, provider_name: str, stats: dict) -> None:
         """Save API usage stats for a provider."""
         pass
+
+    @abstractmethod
+    def seed_vocabulary(self, items: list[dict]) -> None:
+        """Seed vocabulary items into storage. items are dicts with
+        {category, english, word, language, alternatives}."""
+        pass
+
+    @abstractmethod
+    def get_vocab_categories(self, language: str = 'es') -> list[str]:
+        """Get distinct vocabulary categories for a language."""
+        pass
+
+    @abstractmethod
+    def get_vocab_category_items(self, category: str, language: str = 'es') -> list[dict]:
+        """Get vocabulary items for a category.
+        Returns list of {english, word, alternatives} dicts."""
+        pass
+
+    @abstractmethod
+    def get_vocab_item_by_english(self, category: str, english: str, language: str = 'es') -> dict | None:
+        """Look up a single vocabulary item by category and english key.
+        Returns {english, word, alternatives} or None."""
+        pass
