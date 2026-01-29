@@ -183,11 +183,19 @@ class GeminiProvider(AIProvider):
             STEP 2 - EVALUATION RULES:
             1. A word is CORRECTLY translated if the student used a valid English equivalent.
                Multiple English words can be valid translations (e.g., "vista" can be "view", "sight", "vision").
-            2. A word is INCORRECTLY translated if:
+            2. IDIOMATIC EXPRESSIONS: Some {LANGUAGE} phrases have idiomatic meanings that differ from
+               literal word-by-word translation. The student should be credited for correct idiomatic translations.
+               Examples:
+               - "cumplir X años" or "celebrar X años" = "to turn X years old" or "celebrate X birthday"
+                 (NOT literally "fulfill X years" or "celebrate X years")
+               - "tener X años" = "to be X years old" (NOT "to have X years")
+               - "hacer calor/frío" = "to be hot/cold" (NOT "to make heat/cold")
+               When a student correctly translates an idiom, mark all component words as correct.
+            3. A word is INCORRECTLY translated if:
                - Left in {LANGUAGE} (not translated at all, e.g., "casa" instead of "house")
                - Translated to a wrong meaning
                - Omitted entirely
-            3. Do NOT penalize the student for:
+            4. Do NOT penalize the student for:
                - Using synonyms (these are valid translations)
                - Minor word order differences that don't change meaning
                - Using articles (a/an/the) flexibly
@@ -196,9 +204,9 @@ class GeminiProvider(AIProvider):
                - Reflexive pronouns (se, me, te) that are naturally absorbed into English phrasal verbs
                  (e.g., "se pone" → "puts on" is correct, don't require "himself/herself")
                - Grammar elements that have no direct English equivalent when the meaning is preserved
-            4. Only proper nouns (names of people, places, brands) may remain in original form.
-            5. If the translation is semantically correct with all words properly translated, the score should be 100.
-            6. IMPORTANT: If the student's translation conveys the complete meaning naturally in English,
+            5. Only proper nouns (names of people, places, brands) may remain in original form.
+            6. If the translation is semantically correct with all words properly translated, the score should be 100.
+            7. IMPORTANT: If the student's translation conveys the complete meaning naturally in English,
                give 100. Do not deduct points for stylistic differences or implied grammar.
 
             STEP 3 - RESPOND with a Python dictionary:
@@ -222,8 +230,10 @@ class GeminiProvider(AIProvider):
               - Deduct for wrong meanings
               - Minor deductions for grammar issues
 
-            'evaluation': Brief explanation. Be ACCURATE - do not claim a word was "added" if it's
-            a valid translation of a word in the original sentence. Only mention actual errors.
+            'evaluation': Brief explanation. Be ACCURATE:
+              - Do not claim a word was "added" if it's a valid translation or part of an idiom
+              - Do not say "años only means years" when the context is idiomatic (e.g., birthday celebrations)
+              - Only mention actual errors, not valid idiomatic translations
 
             Return ONLY the dictionary, no other text, no markdown formatting.
         """
