@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import time
 import traceback
 import uuid
 from pathlib import Path
@@ -248,10 +249,14 @@ async def generate_story_background(user_id: str, correct_words: list, difficult
                 None,
                 lambda: story_provider.generate_story(correct_words, difficulty)
             )
+            story_ai = story_provider.get_last_call_info()
             pending_stories[user_id] = {
                 'story': story,
                 'difficulty': difficulty,
-                'ms': ms
+                'ms': ms,
+                'model_name': story_ai.get('model_name'),
+                'model_tokens': story_ai.get('model_tokens'),
+                'model_ms': story_ai.get('model_ms')
             }
             logger.info(f"Background story ready for {user_id}: {len(story)} chars, {ms}ms")
         except Exception as e:
@@ -260,17 +265,22 @@ async def generate_story_background(user_id: str, correct_words: list, difficult
             pending_stories.pop(user_id, None)
 
 
-def get_pending_story(user_id: str, difficulty: int) -> tuple[str, int] | None:
+def get_pending_story(user_id: str, difficulty: int) -> tuple[str, int, dict] | None:
     """Get a pre-generated story if available and at the right difficulty."""
     if user_id in pending_stories:
         pending = pending_stories[user_id]
         if pending.get('difficulty') == difficulty and pending.get('story'):
             story = pending['story']
             ms = pending['ms']
+            ai_info = {
+                'model_name': pending.get('model_name'),
+                'model_tokens': pending.get('model_tokens'),
+                'model_ms': pending.get('model_ms')
+            }
             # Clear the pending story
             del pending_stories[user_id]
             logger.info(f"Using pre-generated story for {user_id}")
-            return (story, ms)
+            return (story, ms, ai_info)
     return None
 
 
@@ -449,7 +459,7 @@ async def get_story(user_id: str = "default", force_new: bool = False):
         pending = get_pending_story(user_id, history.difficulty)
         from_cache = pending is not None
         if pending:
-            story, ms = pending
+            story, ms, story_ai = pending
         else:
             # Fall back to synchronous generation with story_provider (pro model)
             loop = asyncio.get_event_loop()
@@ -457,11 +467,11 @@ async def get_story(user_id: str = "default", force_new: bool = False):
                 None,
                 lambda: story_provider.generate_story(history.correct_words, history.difficulty)
             )
+            story_ai = story_provider.get_last_call_info()
         history.set_story(story, history.difficulty, ms)
         save_history(user_id)
 
         # Log story generation
-        story_ai = story_provider.get_last_call_info()
         log_event('story.generate', user_id,
                   from_cache=from_cache,
                   ms=ms,
@@ -507,6 +517,7 @@ async def get_next_sentence(user_id: str = "default"):
 
 
 async def _get_next_sentence_inner(user_id: str = "default"):
+    start_time = time.time()
     history = get_history(user_id)
 
     # Check if there's an existing unevaluated round (e.g., after page refresh)
@@ -672,7 +683,7 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 pending = get_pending_story(user_id, history.difficulty)
                 from_cache = pending is not None
                 if pending:
-                    story, ms = pending
+                    story, ms, story_ai = pending
                 else:
                     # Fall back to synchronous generation with story_provider (pro model)
                     loop = asyncio.get_event_loop()
@@ -680,6 +691,7 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                         None,
                         lambda: story_provider.generate_story(history.correct_words, history.difficulty)
                     )
+                    story_ai = story_provider.get_last_call_info()
                 history.set_story(story, history.difficulty, ms)
                 save_history(user_id)
 
@@ -688,7 +700,10 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                           from_cache=from_cache,
                           ms=ms,
                           sentence_count=len(history.story_sentences),
-                          model='gemini-2.5-pro')
+                          ai_used=True,
+                          model_name=story_ai.get('model_name'),
+                          model_tokens=story_ai.get('model_tokens'),
+                          model_ms=story_ai.get('model_ms'))
 
             # Get next sentence
             current_round, is_review = history.get_next_sentence()
@@ -775,25 +790,30 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         sentence = sentence[5:]  # Remove prefix for display
 
     # Log sentence or challenge served
+    ms = int((time.time() - start_time) * 1000)
     if is_word_challenge:
         log_event('challenge.served', user_id,
                   challenge_type='word',
-                  word=sentence)
+                  word=sentence,
+                  ms=ms)
     elif is_vocab_challenge:
         log_event('challenge.served', user_id,
                   challenge_type='vocab',
                   word=sentence,
-                  category=vocab_challenge.get('category') if vocab_challenge else None)
+                  category=vocab_challenge.get('category') if vocab_challenge else None,
+                  ms=ms)
     elif is_verb_challenge:
         log_event('challenge.served', user_id,
                   challenge_type='verb',
                   word=sentence,
-                  tense=verb_challenge.get('tense') if verb_challenge else None)
+                  tense=verb_challenge.get('tense') if verb_challenge else None,
+                  ms=ms)
     else:
         log_event('sentence.served', user_id,
                   sentence=sentence,
                   is_review=is_review,
-                  sentences_remaining=len(history.story_sentences))
+                  sentences_remaining=len(history.story_sentences),
+                  ms=ms)
 
     return NextSentenceResponse(
         sentence=sentence,
@@ -818,6 +838,7 @@ async def submit_translation(request: TranslationRequest):
     """Submit a translation for evaluation."""
     import logging
     logger = logging.getLogger(__name__)
+    start_time = time.time()
 
     try:
         history = get_history(request.user_id)
@@ -1134,11 +1155,13 @@ async def submit_translation(request: TranslationRequest):
             save_history(request.user_id)
 
             # Log translation submission and result for challenges
+            ms = int((time.time() - start_time) * 1000)
             log_event('translation.submit', request.user_id,
                       sentence=request.sentence,
                       translation=request.translation,
                       challenge_type=challenge_type,
-                      hint_used=request.hint_used)
+                      hint_used=request.hint_used,
+                      ms=ms)
             log_event('translation.result', request.user_id,
                       score=current_round.get_score(),
                       challenge_type=challenge_type,
@@ -1167,11 +1190,13 @@ async def submit_translation(request: TranslationRequest):
         save_history(request.user_id)
 
         # Log translation submission and result
+        ms = int((time.time() - start_time) * 1000)
         log_event('translation.submit', request.user_id,
                   sentence=request.sentence,
                   translation=request.translation,
                   hint_used=request.hint_used,
-                  hint_words=request.hint_words)
+                  hint_words=request.hint_words,
+                  ms=ms)
         validate_ai = ai_provider.get_last_call_info()
         log_event('translation.result', request.user_id,
                   score=current_round.get_score(),
@@ -1231,6 +1256,7 @@ async def get_hint(request: HintRequest):
 
 
 async def _get_hint_inner(request: HintRequest):
+    start_time = time.time()
     history = get_history(request.user_id)
 
     hint = ai_provider.get_hint(request.sentence, history.correct_words)
@@ -1245,9 +1271,11 @@ async def _get_hint_inner(request: HintRequest):
         if hint.get('adjective'):
             words_revealed.append(hint['adjective'][0])
     hint_ai = ai_provider.get_last_call_info()
+    ms = int((time.time() - start_time) * 1000)
     log_event('hint.request', request.user_id,
               sentence=request.sentence,
               words_revealed=words_revealed,
+              ms=ms,
               ai_used=True,
               model_name=hint_ai.get('model_name'),
               model_tokens=hint_ai.get('model_tokens'),
