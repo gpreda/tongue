@@ -15,3 +15,6 @@ DEMOTE_REQUIRED_POOR = 4      # Number of poor scores to trigger demotion
 
 # Story generation
 STORY_SENTENCE_COUNT = 30     # Number of sentences per story
+
+# Practice time tracking
+PRACTICE_TIME_INACTIVITY_THRESHOLD = 60  # seconds - deltas above this are ignored (user AFK)

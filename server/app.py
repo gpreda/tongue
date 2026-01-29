@@ -107,6 +107,8 @@ class StatusResponse(BaseModel):
     progress_display: str
     challenge_stats: dict  # {word: {correct, incorrect}, vocab: {...}, verb: {...}}
     challenge_stats_display: str  # "12/15" format
+    practice_time_seconds: int
+    practice_time_display: str  # Human-readable format like "2h 15m"
 
 
 class NextSentenceResponse(BaseModel):
@@ -143,6 +145,9 @@ story_generation_locks: dict[str, asyncio.Lock] = {}  # Prevent duplicate genera
 # Session tracking
 user_sessions: dict[str, str] = {}  # user_id -> session_id
 
+# Practice time tracking - when sentences were served to users
+user_served_times: dict[str, float] = {}  # user_id -> timestamp
+
 
 def get_session_id(user_id: str) -> str:
     """Get or create a session ID for a user."""
@@ -155,6 +160,34 @@ def new_session(user_id: str) -> str:
     """Create a new session for a user."""
     user_sessions[user_id] = str(uuid.uuid4())[:8]
     return user_sessions[user_id]
+
+
+def record_served_time(user_id: str) -> None:
+    """Record when a sentence/challenge was served to a user."""
+    user_served_times[user_id] = time.time()
+
+
+def get_practice_delta(user_id: str) -> float | None:
+    """Get practice time delta since sentence was served.
+    Returns delta in seconds, or None if no served time recorded."""
+    served_time = user_served_times.get(user_id)
+    if served_time is not None:
+        delta = time.time() - served_time
+        del user_served_times[user_id]  # Clear to prevent double-counting
+        return delta
+    return None
+
+
+def format_practice_time(seconds: int) -> str:
+    """Format seconds as human-readable time."""
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours}h {minutes}m"
 
 
 def log_event(event: str, user_id: str, **data) -> None:
@@ -421,20 +454,22 @@ async def get_status(user_id: str = "default"):
         history = get_history(user_id)
 
         return StatusResponse(
-        language=LANGUAGE,
-        difficulty=history.difficulty,
-        max_difficulty=MAX_DIFFICULTY,
-        total_completed=history.total_completed,
-        mastered_words_count=len(history.correct_words),
-        missed_words_count=len(history.missed_words),
-        recent_mastered=history.correct_words[-10:] if history.correct_words else [],
-        level_scores=history.level_scores,
-        good_score_count=history.get_good_score_count(),
-        poor_score_count=history.get_poor_score_count(),
-        story_sentences_remaining=len(history.story_sentences),
-        progress_display=history.get_progress_display(),
+            language=LANGUAGE,
+            difficulty=history.difficulty,
+            max_difficulty=MAX_DIFFICULTY,
+            total_completed=history.total_completed,
+            mastered_words_count=len(history.correct_words),
+            missed_words_count=len(history.missed_words),
+            recent_mastered=history.correct_words[-10:] if history.correct_words else [],
+            level_scores=history.level_scores,
+            good_score_count=history.get_good_score_count(),
+            poor_score_count=history.get_poor_score_count(),
+            story_sentences_remaining=len(history.story_sentences),
+            progress_display=history.get_progress_display(),
             challenge_stats=history.challenge_stats,
-            challenge_stats_display=history.get_challenge_stats_display()
+            challenge_stats_display=history.get_challenge_stats_display(),
+            practice_time_seconds=int(history.practice_time_seconds),
+            practice_time_display=format_practice_time(int(history.practice_time_seconds))
         )
     except HTTPException:
         raise
@@ -789,6 +824,9 @@ async def _get_next_sentence_inner(user_id: str = "default"):
     elif is_verb_challenge and sentence.startswith("VERB:"):
         sentence = sentence[5:]  # Remove prefix for display
 
+    # Record when this sentence/challenge was served for practice time tracking
+    record_served_time(user_id)
+
     # Log sentence or challenge served
     ms = int((time.time() - start_time) * 1000)
     if is_word_challenge:
@@ -857,6 +895,18 @@ async def submit_translation(request: TranslationRequest):
                           current_round.sentence.startswith("VOCAB4R:"))
         is_vocab_challenge = current_round.sentence.startswith("VOCAB:") or is_multi_vocab
         is_verb_challenge = current_round.sentence.startswith("VERB:")
+
+        # Calculate and record practice time
+        practice_delta = get_practice_delta(request.user_id)
+        if practice_delta is not None:
+            practice_recorded = history.record_practice_time(practice_delta)
+            # Log practice time event
+            challenge_type_str = 'verb' if is_verb_challenge else ('vocab' if is_vocab_challenge else ('word' if is_word_challenge else 'sentence'))
+            log_event('practice_time.delta', request.user_id,
+                      delta_seconds=round(practice_delta, 2),
+                      task_type=challenge_type_str,
+                      recorded=practice_recorded,
+                      ms=int(practice_delta * 1000))
 
         if is_verb_challenge:
             # Verb challenge: check both translation AND tense

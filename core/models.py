@@ -78,6 +78,8 @@ class History:
             'vocab': {'correct': 0, 'incorrect': 0},
             'verb': {'correct': 0, 'incorrect': 0}
         }
+        # Practice time tracking (seconds spent actively practicing)
+        self.practice_time_seconds = 0
 
     def to_dict(self) -> dict:
         return {
@@ -95,7 +97,8 @@ class History:
             'review_queue': self.review_queue,
             'vocab_progress': self.vocab_progress,
             'vocab_progress_version': self.vocab_progress_version,
-            'challenge_stats': self.challenge_stats
+            'challenge_stats': self.challenge_stats,
+            'practice_time_seconds': self.practice_time_seconds
         }
 
     @classmethod
@@ -136,6 +139,7 @@ class History:
             'vocab': {'correct': 0, 'incorrect': 0},
             'verb': {'correct': 0, 'incorrect': 0}
         })
+        history.practice_time_seconds = data.get('practice_time_seconds', 0)
         return history
 
     def _migrate_legacy_words(self) -> None:
@@ -607,3 +611,11 @@ class History:
         if total_attempts == 0:
             return "0/0"
         return f"{total_correct}/{total_attempts}"
+
+    def record_practice_time(self, delta_seconds: float) -> bool:
+        """Record practice time if within threshold. Returns True if recorded."""
+        from core.config import PRACTICE_TIME_INACTIVITY_THRESHOLD
+        if 0 < delta_seconds <= PRACTICE_TIME_INACTIVITY_THRESHOLD:
+            self.practice_time_seconds += delta_seconds
+            return True
+        return False
