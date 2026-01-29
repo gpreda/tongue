@@ -57,6 +57,7 @@ const elements = {
     progressDisplay: document.getElementById('progress-display'),
     challengeDisplay: document.getElementById('challenge-display'),
     completedDisplay: document.getElementById('completed-display'),
+    practiceTimeDisplay: document.getElementById('practice-time-display'),
     statusBtn: document.getElementById('status-btn'),
 
     storySection: document.getElementById('story-section'),
@@ -310,6 +311,7 @@ function updateStatusBar(status) {
     elements.progressDisplay.textContent = `${status.good_score_count}/7`;
     elements.challengeDisplay.textContent = status.challenge_stats_display || '0/0';
     elements.completedDisplay.textContent = `${status.total_completed}`;
+    elements.practiceTimeDisplay.textContent = status.practice_time_display || '0s';
 }
 
 function splitIntoSentences(text) {

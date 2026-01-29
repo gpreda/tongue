@@ -169,6 +169,14 @@ header h1 {
     color: #3498db;
 }
 
+#practice-time-display::before {
+    content: "⏱ ";
+}
+
+.practice-time-display {
+    color: #9b59b6;
+}
+
 .status-actions {
     display: flex;
     align-items: center;
