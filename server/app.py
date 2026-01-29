@@ -967,11 +967,20 @@ async def submit_translation(request: TranslationRequest):
             else:
                 evaluation = f'Incorrect: {correct_str}'
 
+            if is_reverse:
+                # Reverse mode: English shown, Spanish expected
+                vocab_breakdown = [[item['alternatives'], item['word'], category, word_results[i]['is_correct']] for i, item in enumerate(vocab_items)]
+                correct_trans = ', '.join(item['word'] for item in vocab_items)
+            else:
+                # Forward mode: Spanish shown, English expected
+                vocab_breakdown = [[item['word'], item['alternatives'], category, word_results[i]['is_correct']] for i, item in enumerate(vocab_items)]
+                correct_trans = ', '.join(item['alternatives'] for item in vocab_items)
+
             judgement = {
                 'score': total_score,
-                'correct_translation': ', '.join(item['alternatives'] for item in vocab_items),
+                'correct_translation': correct_trans,
                 'evaluation': evaluation,
-                'vocabulary_breakdown': [[item['word'], item['alternatives'], category, word_results[i]['is_correct']] for i, item in enumerate(vocab_items)]
+                'vocabulary_breakdown': vocab_breakdown
             }
             judge_ms = 0
 
