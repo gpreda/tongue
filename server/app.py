@@ -1052,9 +1052,27 @@ async def submit_translation(request: TranslationRequest):
             # Parse correct answers (comma-separated)
             correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
 
-            # Check if translation matches (case-insensitive)
+            # Check if translation matches (case-insensitive, with plural tolerance)
             student_answer = request.translation.strip().lower()
+
+            def normalize_word(w: str) -> str:
+                """Normalize word for comparison (handle common plural/singular forms)."""
+                w = w.strip()
+                if w.endswith('ies'):
+                    return w[:-3] + 'y'  # flies -> fly
+                if w.endswith('es'):
+                    return w[:-2]  # watches -> watch
+                if w.endswith('s') and len(w) > 2:
+                    return w[:-1]  # marks -> mark
+                return w
+
+            # Check exact match first, then normalized match
             is_correct = student_answer in correct_answers
+            if not is_correct:
+                # Try normalized comparison (singular/plural tolerance)
+                normalized_student = normalize_word(student_answer)
+                normalized_correct = {normalize_word(a) for a in correct_answers}
+                is_correct = normalized_student in normalized_correct or student_answer in normalized_correct
 
             score = 100 if is_correct else 0
             judgement = {
