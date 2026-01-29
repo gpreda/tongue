@@ -178,6 +178,7 @@ class GeminiProvider(AIProvider):
 
             Example analysis:
             - "escuela" → correct: "school" → student used: "stairs" → MISMATCH (mistranslated)
+            - "montañas" → correct: "mountains" → student used: "montanas" → MISMATCH (not translated, just copied)
             - "caminan" → correct: "walk/walking" → student used: "walk" → MATCH
 
             STEP 2 - EVALUATION RULES:
@@ -193,6 +194,8 @@ class GeminiProvider(AIProvider):
                When a student correctly translates an idiom, mark all component words as correct.
             3. A word is INCORRECTLY translated if:
                - Left in {LANGUAGE} (not translated at all, e.g., "casa" instead of "house")
+               - Copied with accents removed (e.g., "montanas" instead of "mountains" for "montañas",
+                 "manana" instead of "tomorrow" for "mañana") - this is NOT a translation
                - Translated to a wrong meaning
                - Omitted entirely
             4. Do NOT penalize the student for:
@@ -205,6 +208,7 @@ class GeminiProvider(AIProvider):
                  (e.g., "se pone" → "puts on" is correct, don't require "himself/herself")
                - Grammar elements that have no direct English equivalent when the meaning is preserved
             5. Only proper nouns (names of people, places, brands) may remain in original form.
+               Common nouns MUST be translated (e.g., "montañas" → "mountains", not "montanas").
             6. If the translation is semantically correct with all words properly translated, the score should be 100.
             7. IMPORTANT: If the student's translation conveys the complete meaning naturally in English,
                give 100. Do not deduct points for stylistic differences or implied grammar.
