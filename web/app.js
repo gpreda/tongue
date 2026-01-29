@@ -115,6 +115,7 @@ const elements = {
     masteredTbody: document.getElementById('mastered-tbody'),
 
     learningBtn: document.getElementById('learning-btn'),
+    downgradeBtn: document.getElementById('downgrade-btn'),
     learningModal: document.getElementById('learning-modal'),
     learningCount: document.getElementById('learning-count'),
     learningTbody: document.getElementById('learning-tbody'),
@@ -668,8 +669,8 @@ async function loadNextSentence() {
         const status = await getStatus();
         updateStatusBar(status);
 
-        // Render story (hide for challenges)
-        if (data.is_word_challenge || data.is_vocab_challenge || data.is_verb_challenge) {
+        // Render story (hide for challenges or when no story)
+        if (data.is_word_challenge || data.is_vocab_challenge || data.is_verb_challenge || !data.story) {
             elements.storySection.classList.add('hidden');
         } else {
             renderStory(data.story, data.difficulty, data.sentence);
@@ -891,6 +892,22 @@ function showUsernameError(message) {
     elements.usernameError.classList.remove('hidden');
 }
 
+async function handleDowngrade() {
+    if (!confirm('Go back to the previous level? This will reset your current score progress.')) return;
+    try {
+        const data = await api(`/api/downgrade?user_id=${currentUser}`, { method: 'POST' });
+        if (data.success) {
+            const status = await api(`/api/status?user_id=${currentUser}`);
+            updateStatusBar(status);
+            loadNextSentence();
+        } else {
+            alert(data.error || 'Cannot downgrade further.');
+        }
+    } catch (e) {
+        alert('Failed to downgrade level.');
+    }
+}
+
 function handleNewGame() {
     if (confirm('Start a new game? This will take you back to the name selection screen.')) {
         deleteCookie('tongue_user');
@@ -916,7 +933,8 @@ elements.menuBtn.addEventListener('click', toggleMenu);
 elements.statusBtn.addEventListener('click', () => { closeMenu(); showStatusModal(); });
 elements.masteredBtn.addEventListener('click', () => { closeMenu(); showMasteredModal(); });
 elements.learningBtn.addEventListener('click', () => { closeMenu(); showLearningModal(); });
-elements.newGameBtn.addEventListener('click', handleNewGame);
+elements.downgradeBtn.addEventListener('click', () => { closeMenu(); handleDowngrade(); });
+elements.newGameBtn.addEventListener('click', () => { closeMenu(); handleNewGame(); });
 
 // Enter-key navigation for multi-word inputs
 for (let i = 0; i < 4; i++) {

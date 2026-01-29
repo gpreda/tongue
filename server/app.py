@@ -1341,6 +1341,25 @@ async def _get_hint_inner(request: HintRequest):
     )
 
 
+@app.post("/api/downgrade")
+async def downgrade_level(user_id: str = "default"):
+    """Voluntarily go back to the previous difficulty level, resetting score progress."""
+    history = get_history(user_id)
+    old_level = history.difficulty
+
+    if old_level <= MIN_DIFFICULTY:
+        return {"success": False, "error": "Already at the lowest level"}
+
+    history.demote_level()
+    save_history(user_id)
+
+    log_event('level.downgrade', user_id,
+              old_level=old_level,
+              new_level=history.difficulty)
+
+    return {"success": True, "new_level": history.difficulty}
+
+
 @app.get("/api/learning-words")
 async def get_learning_words(user_id: str = "default"):
     """Get words that are still being learned (not yet mastered)."""
