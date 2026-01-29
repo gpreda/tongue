@@ -209,6 +209,9 @@ class FileStorage(Storage):
     def save_verb_conjugation(self, conjugated_form: str, base_verb: str, tense: str,
                               translation: str, person: str) -> None:
         """Save conjugation info for a verb form."""
+        # Use 'n/a' for infinitives and other forms without grammatical person
+        if person is None:
+            person = 'n/a'
         try:
             conjugations = self._load_conjugations()
             conjugations[conjugated_form] = {
