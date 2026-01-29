@@ -289,29 +289,23 @@ def get_category_items_with_english(category: str, language: str = 'es') -> list
     ]
 
 
-def get_random_challenge(category: str, exclude_words: list[str] = None) -> dict | None:
+def get_random_challenge(category: str, reverse: bool = False) -> dict | None:
     """Get a random word from a category.
 
-    Returns dict with: word, translation, english, category, category_name
-    exclude_words is a list of english keys to exclude.
+    Returns dict with: word, translation, english, category, category_name, is_reverse
     """
     items_list = get_category_items_with_english(category)
     if not items_list:
         return None
 
-    exclude_words = exclude_words or []
-    available = [item for item in items_list if item['english'] not in exclude_words]
-
-    if not available:
-        return None
-
-    item = random.choice(available)
+    item = random.choice(items_list)
     return {
         'word': item['word'],
         'translation': item['alternatives'],
         'english': item['english'],
         'category': category,
-        'category_name': get_category_name(category)
+        'category_name': get_category_name(category),
+        'is_reverse': reverse
     }
 
 
@@ -324,39 +318,21 @@ def get_multi_word_number_items() -> list[dict]:
     return [item for item in items if item['word'] in MULTI_WORD_NUMBER_RANGE]
 
 
-def get_multi_word_challenge(category: str, exclude_words: list[str] = None, reverse: bool = False) -> dict | None:
+def get_multi_word_challenge(category: str, reverse: bool = False) -> dict | None:
     """Get a multi-word challenge with 4 random words from a category.
 
     Returns dict with: words (list of {word, translation, english}), category, category_name,
                        is_multi (True), is_reverse (bool)
-    exclude_words is a list of english keys to exclude.
     """
     if category == 'number':
         items_list = get_multi_word_number_items()
     else:
         items_list = get_category_items_with_english(category)
 
-    if not items_list:
+    if not items_list or len(items_list) < 4:
         return None
 
-    exclude_words = exclude_words or []
-    available = [item for item in items_list if item['english'] not in exclude_words]
-
-    # For seasons (only 4 words), use all of them even if mastered
-    if category == 'season' and len(available) < 4:
-        available = list(items_list)
-
-    if len(available) < 4:
-        # Not enough unmastered words; fill from all items
-        available_english = {item['english'] for item in available}
-        remaining = [item for item in items_list if item['english'] not in available_english]
-        random.shuffle(remaining)
-        available.extend(remaining[:4 - len(available)])
-
-    if len(available) < 4:
-        return None
-
-    selected = random.sample(available, 4)
+    selected = random.sample(items_list, 4)
     words = [{'word': item['word'], 'translation': item['alternatives'], 'english': item['english']}
              for item in selected]
 

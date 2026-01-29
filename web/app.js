@@ -473,9 +473,13 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
         document.getElementById('multi-input-0').focus();
     } else if (isVocabChal && vocabChallenge) {
         // Single-word vocab challenge
+        isReverseVocab = vocabChallenge.is_reverse || false;
         elements.vocabChallengeNotice.classList.remove('hidden');
         elements.vocabCategory.textContent = vocabChallenge.category_name;
-        elements.taskPrompt.textContent = 'Translate this word:';
+        elements.vocabDirection.textContent = isReverseVocab ? 'EN \u2192 ES' : 'ES \u2192 EN';
+        elements.taskPrompt.textContent = isReverseVocab
+            ? 'Type the Spanish word for:'
+            : 'Translate this word:';
         elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
         elements.hintBtn.classList.add('hidden');

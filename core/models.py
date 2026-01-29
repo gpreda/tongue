@@ -323,9 +323,9 @@ class History:
             part_of_speech = (v_breakdown[2] or 'unknown').lower()
             was_correct = v_breakdown[3]
 
-            # Skip words that were given as hints (don't count for stats)
+            # Words given as hints count as incorrect
             if word in hint_words:
-                continue
+                was_correct = False
 
             # Update unified words structure
             if word not in self.words:
@@ -346,6 +346,8 @@ class History:
                 self.words[word]['correct_count'] += 1
             else:
                 self.words[word]['incorrect_count'] += 1
+                # Reset challenge_passed so the word can reappear in challenges
+                self.words[word]['challenge_passed'] = False
 
             # Also update legacy structures for backwards compatibility
             if was_correct and part_of_speech in ['noun', 'verb']:
@@ -477,6 +479,9 @@ class History:
         for word, info in self.words.items():
             if self._is_proper_noun(word):
                 continue
+            # Skip words already passed in a challenge (unless missed later)
+            if info.get('challenge_passed'):
+                continue
             total = info['correct_count'] + info['incorrect_count']
             if total > 0:
                 success_rate = info['correct_count'] / total
@@ -490,7 +495,8 @@ class History:
 
         if not candidates:
             # Fall back to any non-proper-noun word if no low success rate words
-            eligible = [w for w in self.words.keys() if not self._is_proper_noun(w)]
+            eligible = [w for w in self.words.keys()
+                        if not self._is_proper_noun(w) and not self.words[w].get('challenge_passed')]
             if not eligible:
                 return None
             word = random.choice(eligible)
@@ -519,45 +525,21 @@ class History:
 
     def get_vocab_challenge(self) -> dict | None:
         """Get a vocabulary challenge from a random category.
-        For multi-word categories (day, month, season, number), returns a multi-word
-        challenge with 4 words and 50% chance of reverse direction.
+        Each category has equal probability. Each word within a category has equal probability.
+        Translation direction: es->en 80%, en->es 20%.
+        For multi-word categories (day, month, season, number), returns a multi-word challenge.
         For other categories, returns single-word challenge.
         """
         from core.vocabulary import (get_all_categories, get_random_challenge,
                                      get_multi_word_challenge, MULTI_WORD_CATEGORIES)
 
-        categories = get_all_categories()
-        random.shuffle(categories)
+        category = random.choice(get_all_categories())
+        reverse = random.random() < 0.2  # 20% en->es, 80% es->en
 
-        for category in categories:
-            # Get words user has mastered in this category
-            mastered = self._get_mastered_vocab_words(category)
-
-            if category in MULTI_WORD_CATEGORIES:
-                reverse = random.random() < 0.5
-                challenge = get_multi_word_challenge(category, exclude_words=mastered, reverse=reverse)
-            else:
-                challenge = get_random_challenge(category, exclude_words=mastered)
-
-            if challenge:
-                return challenge
-
-        return None
-
-    def _get_mastered_vocab_words(self, category: str) -> list[str]:
-        """Get list of english keys user has mastered in a category (>=2 correct, >=80% rate)."""
-        mastered = []
-        if category not in self.vocab_progress:
-            return mastered
-
-        for english_key, stats in self.vocab_progress[category].items():
-            correct = stats.get('correct', 0)
-            incorrect = stats.get('incorrect', 0)
-            total = correct + incorrect
-            if total >= 2 and correct / total >= 0.8:
-                mastered.append(english_key)
-
-        return mastered
+        if category in MULTI_WORD_CATEGORIES:
+            return get_multi_word_challenge(category, reverse=reverse)
+        else:
+            return get_random_challenge(category, reverse=reverse)
 
     def record_vocab_result(self, category: str, english_key: str, is_correct: bool) -> None:
         """Record result of a vocabulary challenge by english key."""
