@@ -163,10 +163,17 @@ class GeminiProvider(AIProvider):
         self._record_stats('story', ms, token_stats)
         return (text, ms)
 
-    def validate_translation(self, sentence: str, translation: str) -> tuple[dict, int]:
+    def validate_translation(self, sentence: str, translation: str, story_context: str = None) -> tuple[dict, int]:
+        context_block = ""
+        if story_context:
+            context_block = f"""
+            STORY CONTEXT (use this to resolve ambiguities like pronouns, possessives, and references):
+            "{story_context}"
+            """
+
         prompt = f"""
             You are evaluating a student's English translation of a {LANGUAGE} sentence.
-
+            {context_block}
             {LANGUAGE} Sentence: "{sentence}"
             Student's Translation: "{translation}"
 
@@ -212,6 +219,11 @@ class GeminiProvider(AIProvider):
             6. If the translation is semantically correct with all words properly translated, the score should be 100.
             7. IMPORTANT: If the student's translation conveys the complete meaning naturally in English,
                give 100. Do not deduct points for stylistic differences or implied grammar.
+            8. CONTEXT-DEPENDENT WORDS: Words like "su" (his/her/your/their) or "este/esta" must be
+               evaluated based on the story context. If the story is about a male character (e.g., Mateo),
+               then "su hermana" should be "his sister", not "her sister". Accept any translation that
+               is valid given the story context. Do NOT penalize for choosing one valid interpretation
+               when the context supports it.
 
             STEP 3 - RESPOND with a Python dictionary:
 

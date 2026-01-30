@@ -1199,7 +1199,8 @@ async def submit_translation(request: TranslationRequest):
 
             judgement, judge_ms = ai_provider.validate_translation(
                 request.sentence,
-                request.translation
+                request.translation,
+                story_context=history.current_story
             )
 
         current_round.translation = request.translation
