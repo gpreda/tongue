@@ -197,7 +197,16 @@ async function api(endpoint, options = {}) {
         let detail = `API error: ${response.status}`;
         try {
             const data = await response.json();
-            if (data.detail) detail = data.detail;
+            if (data.detail) {
+                // FastAPI validation errors return detail as an array of objects
+                if (Array.isArray(data.detail)) {
+                    detail = data.detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+                } else if (typeof data.detail === 'string') {
+                    detail = data.detail;
+                } else {
+                    detail = JSON.stringify(data.detail);
+                }
+            }
         } catch (e) {}
         addErrorToLog(endpoint, detail, response.status);
         throw new Error(detail);
@@ -695,7 +704,7 @@ async function loadNextSentence() {
 
     } catch (error) {
         console.error('Error loading sentence:', error);
-        elements.loading.innerHTML = `<p>Error loading: ${error.message}</p><p><button onclick="loadNextSentence()">Retry</button></p>`;
+        elements.loading.innerHTML = `<p>Error loading: ${error.message || error}</p><p><button onclick="loadNextSentence()">Retry</button></p>`;
     }
 }
 
