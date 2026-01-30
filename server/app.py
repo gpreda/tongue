@@ -1343,15 +1343,23 @@ async def _get_hint_inner(request: HintRequest):
 
     hint = ai_provider.get_hint(request.sentence, history.correct_words)
 
+    # Sanitize hint entries: discard arrays with null/None/"null" values
+    def valid_entry(entry):
+        return (isinstance(entry, list) and len(entry) >= 2
+                and entry[0] is not None and entry[0] != 'null'
+                and entry[1] is not None and entry[1] != 'null')
+
+    if hint:
+        for key in ('noun', 'verb', 'adjective'):
+            if key in hint and not valid_entry(hint.get(key)):
+                hint[key] = None
+
     # Log hint request
     words_revealed = []
     if hint:
-        if hint.get('noun'):
-            words_revealed.append(hint['noun'][0])
-        if hint.get('verb'):
-            words_revealed.append(hint['verb'][0])
-        if hint.get('adjective'):
-            words_revealed.append(hint['adjective'][0])
+        for key in ('noun', 'verb', 'adjective'):
+            if hint.get(key):
+                words_revealed.append(hint[key][0])
     hint_ai = ai_provider.get_last_call_info()
     ms = int((time.time() - start_time) * 1000)
     log_event('hint.request', request.user_id,

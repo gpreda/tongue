@@ -790,20 +790,23 @@ async function handleHint() {
     try {
         const hint = await getHint(currentSentence);
 
+        // Filter out entries where the AI returned null values inside the array
+        const validHint = (h) => Array.isArray(h) && h[0] && h[0] !== 'null';
+
         let hintHtml = '<strong>Hint:</strong><br>';
-        if (hint.noun) {
+        if (validHint(hint.noun)) {
             hintHtml += `Noun: <em>${hint.noun[0]}</em> = ${hint.noun[1]}<br>`;
             hintWords.push(hint.noun[0]);  // Track hint word
         }
-        if (hint.verb) {
+        if (validHint(hint.verb)) {
             hintHtml += `Verb: <em>${hint.verb[0]}</em> = ${hint.verb[1]}<br>`;
             hintWords.push(hint.verb[0]);  // Track hint word
         }
-        if (hint.adjective) {
+        if (validHint(hint.adjective)) {
             hintHtml += `Adjective: <em>${hint.adjective[0]}</em> = ${hint.adjective[1]}`;
             hintWords.push(hint.adjective[0]);  // Track hint word
         }
-        if (!hint.noun && !hint.verb && !hint.adjective) {
+        if (!validHint(hint.noun) && !validHint(hint.verb) && !validHint(hint.adjective)) {
             hintHtml = 'No hint available';
         }
 
