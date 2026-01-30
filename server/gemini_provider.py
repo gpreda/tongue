@@ -141,9 +141,22 @@ class GeminiProvider(AIProvider):
         if direction == 'reverse':
             story_language = 'English'
             target_language = LANGUAGE
+            difficulty_description = f"""
+            - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
+              The student will translate these English sentences into {LANGUAGE}.
+              The difficulty refers to the {LANGUAGE} translation complexity:
+              Level 1 = use only basic English that translates to simple {LANGUAGE} (present tense, common words like "the cat is big", "I eat food", "she has a house")
+              Level 5 = intermediate (sentences requiring varied {LANGUAGE} vocabulary, multiple tenses)
+              Level 10 = expert (sentences requiring advanced {LANGUAGE}: subjunctive, idioms, complex grammar)
+            - IMPORTANT: At level 1, use very simple, short sentences with basic everyday words only. No uncommon nouns like "meadow", "stream", "trail". Stick to: cat, dog, house, food, water, school, friend, family, etc."""
         else:
             story_language = LANGUAGE
             target_language = 'English'
+            difficulty_description = f"""
+            - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
+              Level 1 = beginner (simple vocabulary, present tense, basic grammar)
+              Level 5 = intermediate (varied vocabulary, multiple tenses, compound sentences)
+              Level 10 = expert (advanced vocabulary, subjunctive, idioms, complex grammar)"""
 
         prompt = f"""
             Story ID: {seed}
@@ -156,10 +169,7 @@ class GeminiProvider(AIProvider):
             - The first sentence must include a noun that starts with the letter "{letter}"
 
             Requirements:
-            - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
-              Level 1 = beginner (simple vocabulary, present tense, basic grammar)
-              Level 5 = intermediate (varied vocabulary, multiple tenses, compound sentences)
-              Level 10 = expert (advanced vocabulary, subjunctive, idioms, complex grammar)
+            {difficulty_description}
             - Each sentence should be 5-20 words long
             - Use vocabulary and grammar appropriate for level {difficulty}
             - Try to avoid using these nouns (the student already knows them): {', '.join(avoided_words) if avoided_words else 'none'}
