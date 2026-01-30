@@ -7,17 +7,17 @@ class AIProvider(ABC):
     """Abstract base class for AI/LLM provider."""
 
     @abstractmethod
-    def generate_story(self, correct_words: list, difficulty: int) -> tuple[str, int]:
+    def generate_story(self, correct_words: list, difficulty: int, direction: str = 'normal') -> tuple[str, int]:
         """Generate a story. Returns (story_text, generation_time_ms)."""
         pass
 
     @abstractmethod
-    def validate_translation(self, sentence: str, translation: str) -> tuple[dict, int]:
+    def validate_translation(self, sentence: str, translation: str, direction: str = 'normal') -> tuple[dict, int]:
         """Validate a translation. Returns (judgement_dict, validation_time_ms)."""
         pass
 
     @abstractmethod
-    def get_hint(self, sentence: str, correct_words: list) -> dict | None:
+    def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal') -> dict | None:
         """Get a hint for translation. Returns hint dict or None."""
         pass
 

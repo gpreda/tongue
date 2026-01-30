@@ -109,6 +109,7 @@ class StatusResponse(BaseModel):
     challenge_stats_display: str  # "12/15" format
     practice_time_seconds: int
     practice_time_display: str  # Human-readable format like "2h 15m"
+    direction: str = 'normal'  # 'normal' (ES→EN) or 'reverse' (EN→ES)
 
 
 class NextSentenceResponse(BaseModel):
@@ -126,6 +127,7 @@ class NextSentenceResponse(BaseModel):
     verb_challenge: Optional[dict] = None  # {conjugated_form, base_verb, tense, translation, person}
     has_previous_evaluation: bool
     previous_evaluation: Optional[dict]
+    direction: str = 'normal'
 
 
 # Valid tenses for verb challenges
@@ -268,32 +270,35 @@ def save_history(user_id: str = "default") -> None:
         storage.save_state(user_histories[user_id].to_dict(), user_id)
 
 
-async def generate_story_background(user_id: str, correct_words: list, difficulty: int) -> None:
+async def generate_story_background(user_id: str, correct_words: list, difficulty: int, direction: str = 'normal') -> None:
     """Generate a story in the background for a user."""
     # Get or create lock for this user
     if user_id not in story_generation_locks:
         story_generation_locks[user_id] = asyncio.Lock()
 
     async with story_generation_locks[user_id]:
-        # Check if we already have a pending story at this difficulty
+        # Check if we already have a pending story at this difficulty and direction
         if user_id in pending_stories:
             pending = pending_stories[user_id]
-            if pending.get('difficulty') == difficulty and pending.get('story'):
+            if (pending.get('difficulty') == difficulty and
+                    pending.get('direction', 'normal') == direction and
+                    pending.get('story')):
                 logger.info(f"Story already pre-generated for {user_id} at difficulty {difficulty}")
                 return
 
-        logger.info(f"Background generating story for {user_id} at difficulty {difficulty}")
+        logger.info(f"Background generating story for {user_id} at difficulty {difficulty} direction={direction}")
         try:
             # Run in executor to not block the event loop
             loop = asyncio.get_event_loop()
             story, ms = await loop.run_in_executor(
                 None,
-                lambda: story_provider.generate_story(correct_words, difficulty)
+                lambda: story_provider.generate_story(correct_words, difficulty, direction)
             )
             story_ai = story_provider.get_last_call_info()
             pending_stories[user_id] = {
                 'story': story,
                 'difficulty': difficulty,
+                'direction': direction,
                 'ms': ms,
                 'model_name': story_ai.get('model_name'),
                 'model_tokens': story_ai.get('model_tokens'),
@@ -306,11 +311,13 @@ async def generate_story_background(user_id: str, correct_words: list, difficult
             pending_stories.pop(user_id, None)
 
 
-def get_pending_story(user_id: str, difficulty: int) -> tuple[str, int, dict] | None:
-    """Get a pre-generated story if available and at the right difficulty."""
+def get_pending_story(user_id: str, difficulty: int, direction: str = 'normal') -> tuple[str, int, dict] | None:
+    """Get a pre-generated story if available and at the right difficulty and direction."""
     if user_id in pending_stories:
         pending = pending_stories[user_id]
-        if pending.get('difficulty') == difficulty and pending.get('story'):
+        if (pending.get('difficulty') == difficulty and
+                pending.get('direction', 'normal') == direction and
+                pending.get('story')):
             story = pending['story']
             ms = pending['ms']
             ai_info = {
@@ -331,7 +338,7 @@ def trigger_background_story(user_id: str, history: History) -> None:
     # (less than 3 sentences remaining or no story)
     if len(history.story_sentences) < 3 or history.needs_new_story():
         asyncio.create_task(
-            generate_story_background(user_id, history.correct_words, history.difficulty)
+            generate_story_background(user_id, history.correct_words, history.difficulty, history.direction)
         )
 
 
@@ -480,7 +487,8 @@ async def get_status(user_id: str = "default"):
             challenge_stats=history.challenge_stats,
             challenge_stats_display=history.get_challenge_stats_display(),
             practice_time_seconds=int(history.practice_time_seconds),
-            practice_time_display=format_practice_time(int(history.practice_time_seconds))
+            practice_time_display=format_practice_time(int(history.practice_time_seconds)),
+            direction=history.direction
         )
     except HTTPException:
         raise
@@ -502,16 +510,17 @@ async def get_story(user_id: str = "default", force_new: bool = False):
 
     if force_new or history.needs_new_story():
         # Try to use pre-generated story first
-        pending = get_pending_story(user_id, history.difficulty)
+        pending = get_pending_story(user_id, history.difficulty, history.direction)
         from_cache = pending is not None
         if pending:
             story, ms, story_ai = pending
         else:
             # Fall back to synchronous generation with story_provider (pro model)
             loop = asyncio.get_event_loop()
+            direction = history.direction
             story, ms = await loop.run_in_executor(
                 None,
-                lambda: story_provider.generate_story(history.correct_words, history.difficulty)
+                lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction)
             )
             story_ai = story_provider.get_last_call_info()
         history.set_story(story, history.difficulty, ms)
@@ -731,16 +740,17 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             # Generate story if needed
             if history.needs_new_story():
                 # Try to use pre-generated story first
-                pending = get_pending_story(user_id, history.difficulty)
+                pending = get_pending_story(user_id, history.difficulty, history.direction)
                 from_cache = pending is not None
                 if pending:
                     story, ms, story_ai = pending
                 else:
                     # Fall back to synchronous generation with story_provider (pro model)
                     loop = asyncio.get_event_loop()
+                    direction = history.direction
                     story, ms = await loop.run_in_executor(
                         None,
-                        lambda: story_provider.generate_story(history.correct_words, history.difficulty)
+                        lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction)
                     )
                     story_ai = story_provider.get_last_call_info()
                 history.set_story(story, history.difficulty, ms)
@@ -884,7 +894,8 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         is_verb_challenge=is_verb_challenge,
         verb_challenge=verb_challenge,
         has_previous_evaluation=has_previous,
-        previous_evaluation=previous_eval
+        previous_evaluation=previous_eval,
+        direction=history.direction
     )
 
 
@@ -1200,7 +1211,8 @@ async def submit_translation(request: TranslationRequest):
             judgement, judge_ms = ai_provider.validate_translation(
                 request.sentence,
                 request.translation,
-                story_context=history.current_story
+                story_context=history.current_story,
+                direction=history.direction
             )
 
         current_round.translation = request.translation
@@ -1342,7 +1354,7 @@ async def _get_hint_inner(request: HintRequest):
     start_time = time.time()
     history = get_history(request.user_id)
 
-    hint = ai_provider.get_hint(request.sentence, history.correct_words)
+    hint = ai_provider.get_hint(request.sentence, history.correct_words, direction=history.direction)
 
     # Sanitize hint entries: discard arrays with null/None/"null" values
     def valid_entry(entry):
@@ -1399,6 +1411,28 @@ async def downgrade_level(user_id: str = "default"):
               new_level=history.difficulty)
 
     return {"success": True, "new_level": history.difficulty}
+
+
+@app.post("/api/switch-direction")
+async def switch_direction(user_id: str = "default"):
+    """Switch between normal (ES→EN) and reverse (EN→ES) translation direction."""
+    history = get_history(user_id)
+    old_direction = history.direction
+
+    history.switch_direction()
+    save_history(user_id)
+
+    # Clear pending stories (wrong direction)
+    pending_stories.pop(user_id, None)
+
+    # Trigger background story generation for new direction
+    trigger_background_story(user_id, history)
+
+    log_event('direction.switch', user_id,
+              old_direction=old_direction,
+              new_direction=history.direction)
+
+    return {"success": True, "direction": history.direction}
 
 
 @app.get("/api/learning-words")

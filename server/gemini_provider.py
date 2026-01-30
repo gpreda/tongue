@@ -127,7 +127,7 @@ class GeminiProvider(AIProvider):
         s = s.replace('true', 'True')
         return s
 
-    def generate_story(self, correct_words: list, difficulty: int) -> tuple[str, int]:
+    def generate_story(self, correct_words: list, difficulty: int, direction: str = 'normal') -> tuple[str, int]:
         avoided_words = correct_words[-100:] if len(correct_words) > 100 else correct_words
 
         # Generate random elements for story diversity
@@ -137,10 +137,18 @@ class GeminiProvider(AIProvider):
         season = random.choice(SEASONS)
         letter = random.choice("ABCDEFGHJLMNPRST")
 
+        # Swap language based on direction
+        if direction == 'reverse':
+            story_language = 'English'
+            target_language = LANGUAGE
+        else:
+            story_language = LANGUAGE
+            target_language = 'English'
+
         prompt = f"""
             Story ID: {seed}
 
-            Write a short, engaging story in {LANGUAGE} with approximately {STORY_SENTENCE_COUNT} sentences.
+            Write a short, engaging story in {story_language} with approximately {STORY_SENTENCE_COUNT} sentences.
 
             MANDATORY elements (you MUST include ALL of these):
             - The number {number} appears meaningfully in the story
@@ -163,7 +171,7 @@ class GeminiProvider(AIProvider):
         self._record_stats('story', ms, token_stats)
         return (text, ms)
 
-    def validate_translation(self, sentence: str, translation: str, story_context: str = None) -> tuple[dict, int]:
+    def validate_translation(self, sentence: str, translation: str, story_context: str = None, direction: str = 'normal') -> tuple[dict, int]:
         context_block = ""
         if story_context:
             context_block = f"""
@@ -171,16 +179,24 @@ class GeminiProvider(AIProvider):
             "{story_context}"
             """
 
+        # Swap source/target language based on direction
+        if direction == 'reverse':
+            source_language = 'English'
+            target_language = LANGUAGE
+        else:
+            source_language = LANGUAGE
+            target_language = 'English'
+
         prompt = f"""
-            You are evaluating a student's English translation of a {LANGUAGE} sentence.
+            You are evaluating a student's {target_language} translation of a {source_language} sentence.
             {context_block}
-            {LANGUAGE} Sentence: "{sentence}"
+            {source_language} Sentence: "{sentence}"
             Student's Translation: "{translation}"
 
             STEP 1 - WORD-BY-WORD MAPPING (do this carefully):
-            For EACH content word in the {LANGUAGE} sentence:
-            a) List the correct English translation(s)
-            b) Find what English word the student actually used for it
+            For EACH content word in the {source_language} sentence:
+            a) List the correct {target_language} translation(s)
+            b) Find what {target_language} word the student actually used for it
             c) Determine if they match
 
             Example analysis:
@@ -189,9 +205,9 @@ class GeminiProvider(AIProvider):
             - "caminan" → correct: "walk/walking" → student used: "walk" → MATCH
 
             STEP 2 - EVALUATION RULES:
-            1. A word is CORRECTLY translated if the student used a valid English equivalent.
-               Multiple English words can be valid translations (e.g., "vista" can be "view", "sight", "vision").
-            2. IDIOMATIC EXPRESSIONS: Some {LANGUAGE} phrases have idiomatic meanings that differ from
+            1. A word is CORRECTLY translated if the student used a valid {target_language} equivalent.
+               Multiple {target_language} words can be valid translations (e.g., "vista" can be "view", "sight", "vision").
+            2. IDIOMATIC EXPRESSIONS: Some {source_language} phrases have idiomatic meanings that differ from
                literal word-by-word translation. The student should be credited for correct idiomatic translations.
                Examples:
                - "cumplir X años" or "celebrar X años" = "to turn X years old" or "celebrate X birthday"
@@ -200,7 +216,7 @@ class GeminiProvider(AIProvider):
                - "hacer calor/frío" = "to be hot/cold" (NOT "to make heat/cold")
                When a student correctly translates an idiom, mark all component words as correct.
             3. A word is INCORRECTLY translated if:
-               - Left in {LANGUAGE} (not translated at all, e.g., "casa" instead of "house")
+               - Left in {source_language} (not translated at all, e.g., "casa" instead of "house")
                - Copied with accents removed (e.g., "montanas" instead of "mountains" for "montañas",
                  "manana" instead of "tomorrow" for "mañana") - this is NOT a translation
                - Translated to a wrong meaning
@@ -213,11 +229,11 @@ class GeminiProvider(AIProvider):
                - Missing or different punctuation (periods, commas, exclamation marks)
                - Reflexive pronouns (se, me, te) that are naturally absorbed into English phrasal verbs
                  (e.g., "se pone" → "puts on" is correct, don't require "himself/herself")
-               - Grammar elements that have no direct English equivalent when the meaning is preserved
+               - Grammar elements that have no direct equivalent when the meaning is preserved
             5. Only proper nouns (names of people, places, brands) may remain in original form.
-               Common nouns MUST be translated (e.g., "montañas" → "mountains", not "montanas").
+               Common nouns MUST be translated.
             6. If the translation is semantically correct with all words properly translated, the score should be 100.
-            7. IMPORTANT: If the student's translation conveys the complete meaning naturally in English,
+            7. IMPORTANT: If the student's translation conveys the complete meaning naturally in {target_language},
                give 100. Do not deduct points for stylistic differences or implied grammar.
             8. CONTEXT-DEPENDENT WORDS: Words like "su" (his/her/your/their) or "este/esta" must be
                evaluated based on the story context. If the story is about a male character (e.g., Mateo),
@@ -228,27 +244,26 @@ class GeminiProvider(AIProvider):
             STEP 3 - RESPOND with a Python dictionary:
 
             'vocabulary_breakdown': A list of lists, one for each meaningful word/phrase:
-              [0] The {LANGUAGE} word/phrase from the original sentence
-              [1] The correct English translation(s) for this word in context
+              [0] The {source_language} word/phrase from the original sentence
+              [1] The correct {target_language} translation(s) for this word in context
               [2] Part of speech (noun, verb, adjective, etc.)
-              [3] Boolean: True ONLY if the student's translation contains a valid English equivalent.
-                  False if: the word was mistranslated (e.g., "escuela"→"stairs" instead of "school"),
+              [3] Boolean: True ONLY if the student's translation contains a valid {target_language} equivalent.
+                  False if: the word was mistranslated,
                   left untranslated, or omitted entirely.
-                  IMPORTANT: Check the actual English word the student used, not just sentence meaning.
+                  IMPORTANT: Check the actual {target_language} word the student used, not just sentence meaning.
 
-            'correct_translation': A proper English translation of the sentence.
+            'correct_translation': A proper {target_language} translation of the sentence.
               If the student's translation is correct, you may use their translation.
               If the score is less than 100, show a translation that demonstrates what was missed or wrong.
 
             'score': Integer 1-100. Base it on:
               - What percentage of words were correctly translated
-              - Deduct heavily for untranslated {LANGUAGE} words left as-is
+              - Deduct heavily for untranslated {source_language} words left as-is
               - Deduct for wrong meanings
               - Minor deductions for grammar issues
 
             'evaluation': Brief explanation. Be ACCURATE:
               - Do not claim a word was "added" if it's a valid translation or part of an idiom
-              - Do not say "años only means years" when the context is idiomatic (e.g., birthday celebrations)
               - Only mention actual errors, not valid idiomatic translations
 
             Return ONLY the dictionary, no other text, no markdown formatting.
@@ -308,8 +323,34 @@ class GeminiProvider(AIProvider):
             }
         return (judgement, ms)
 
-    def get_hint(self, sentence: str, correct_words: list) -> dict | None:
-        prompt = f"""
+    def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal') -> dict | None:
+        if direction == 'reverse':
+            # Reverse mode: English sentence, provide Spanish translations
+            prompt = f"""
+            Analyze this English sentence and provide a hint for translating to {LANGUAGE}:
+
+            Sentence: "{sentence}"
+
+            Already known words (do NOT include these): {', '.join(correct_words[-50:]) if correct_words else 'none'}
+
+            Find the most challenging/uncommon noun, verb, and adjective from the sentence.
+            Prioritize less common vocabulary that a student would most likely need help with.
+            Provide their {LANGUAGE} translations.
+
+            Respond with ONLY a Python dictionary in this exact format:
+            {{
+                'noun': ['english_noun', 'spanish_translation'],
+                'verb': ['english_verb', 'spanish_translation'],
+                'adjective': ['english_adjective', 'spanish_translation']
+            }}
+
+            If any part of speech is not available (all are known or not present), use null for that entry:
+            {{'noun': null, 'verb': ['english_verb', 'spanish_translation'], 'adjective': null}}
+
+            Return ONLY the dictionary, no other text.
+        """
+        else:
+            prompt = f"""
             Analyze this {LANGUAGE} sentence and provide a hint for translation:
 
             Sentence: "{sentence}"

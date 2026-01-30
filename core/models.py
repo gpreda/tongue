@@ -80,6 +80,56 @@ class History:
         }
         # Practice time tracking (seconds spent actively practicing)
         self.practice_time_seconds = 0
+        # Direction mode: 'normal' (ES→EN) or 'reverse' (EN→ES)
+        self.direction = 'normal'
+        self._reverse_state = None
+
+    # Fields that are swapped per-direction (everything except practice_time_seconds)
+    _DIRECTION_FIELDS = [
+        'rounds', 'correct_words', 'missed_words', 'words', 'difficulty',
+        'level_scores', 'total_completed', 'current_story', 'story_sentences',
+        'story_difficulty', 'story_generate_ms', 'last_evaluated_round',
+        'last_level_changed', 'review_queue', 'vocab_progress',
+        'vocab_progress_version', 'challenge_stats'
+    ]
+
+    def switch_direction(self) -> None:
+        """Switch between normal (ES→EN) and reverse (EN→ES) modes.
+        Captures current direction's state and loads the other direction's state."""
+        # Capture current state
+        current_state = {}
+        for field in self._DIRECTION_FIELDS:
+            value = getattr(self, field)
+            if field == 'rounds':
+                value = [r.to_dict() for r in value]
+            elif field == 'last_evaluated_round':
+                value = value.to_dict() if value else None
+            current_state[field] = value
+
+        # Load other direction's state (or fresh defaults)
+        other_state = self._reverse_state
+        if other_state:
+            for field in self._DIRECTION_FIELDS:
+                if field in other_state:
+                    value = other_state[field]
+                    if field == 'rounds':
+                        value = [TongueRound.from_dict(r) for r in value]
+                    elif field == 'last_evaluated_round':
+                        value = TongueRound.from_dict(value) if value else None
+                    setattr(self, field, value)
+                else:
+                    # Use fresh default for missing fields
+                    fresh = History()
+                    setattr(self, field, getattr(fresh, field))
+        else:
+            # First switch — initialize with fresh defaults
+            fresh = History()
+            for field in self._DIRECTION_FIELDS:
+                setattr(self, field, getattr(fresh, field))
+
+        # Save captured state as reverse, flip direction
+        self._reverse_state = current_state
+        self.direction = 'reverse' if self.direction == 'normal' else 'normal'
 
     def to_dict(self) -> dict:
         return {
@@ -98,8 +148,18 @@ class History:
             'vocab_progress': self.vocab_progress,
             'vocab_progress_version': self.vocab_progress_version,
             'challenge_stats': self.challenge_stats,
-            'practice_time_seconds': self.practice_time_seconds
+            'practice_time_seconds': self.practice_time_seconds,
+            'direction': self.direction,
+            '_reverse_state': self._serialize_reverse_state()
         }
+
+    def _serialize_reverse_state(self) -> dict | None:
+        """Serialize _reverse_state for persistence."""
+        if self._reverse_state is None:
+            return None
+        state = dict(self._reverse_state)
+        # rounds and last_evaluated_round are already dicts when captured by switch_direction
+        return state
 
     @classmethod
     def from_dict(cls, data: dict) -> 'History':
@@ -140,6 +200,8 @@ class History:
             'verb': {'correct': 0, 'incorrect': 0}
         })
         history.practice_time_seconds = data.get('practice_time_seconds', 0)
+        history.direction = data.get('direction', 'normal')
+        history._reverse_state = data.get('_reverse_state', None)
         return history
 
     def _migrate_legacy_words(self) -> None:

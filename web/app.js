@@ -15,6 +15,7 @@ let isVerbChallenge = false;  // Track if current task is a verb challenge
 let isMultiVocab = false;     // Track if current task is a multi-word vocab challenge
 let isReverseVocab = false;   // Track if current task is reverse direction
 let multiVocabWords = [];     // Array of {word, translation} for multi-word challenges
+let currentDirection = 'normal'; // 'normal' (ES→EN) or 'reverse' (EN→ES)
 
 // Cookie helpers
 function setCookie(name, value, days = 365) {
@@ -115,6 +116,7 @@ const elements = {
     masteredTbody: document.getElementById('mastered-tbody'),
 
     learningBtn: document.getElementById('learning-btn'),
+    switchDirectionBtn: document.getElementById('switch-direction-btn'),
     downgradeBtn: document.getElementById('downgrade-btn'),
     learningModal: document.getElementById('learning-modal'),
     learningCount: document.getElementById('learning-count'),
@@ -317,11 +319,15 @@ async function updateApiStats() {
 
 // UI Functions
 function updateStatusBar(status) {
-    elements.levelDisplay.textContent = `L${status.difficulty}`;
+    const dir = status.direction || 'normal';
+    currentDirection = dir;
+    const prefix = dir === 'reverse' ? 'R' : 'L';
+    elements.levelDisplay.textContent = `${prefix}${status.difficulty}`;
     elements.progressDisplay.textContent = `${status.good_score_count}/7`;
     elements.challengeDisplay.textContent = status.challenge_stats_display || '0/0';
     elements.completedDisplay.textContent = `${status.total_completed}`;
     elements.practiceTimeDisplay.textContent = status.practice_time_display || '0s';
+    elements.switchDirectionBtn.textContent = dir === 'reverse' ? 'Switch to Normal' : 'Switch to Reverse';
 }
 
 function splitIntoSentences(text) {
@@ -330,7 +336,8 @@ function splitIntoSentences(text) {
 
 function renderStory(story, difficulty, currentSentenceText) {
     elements.storySection.classList.remove('hidden');
-    elements.storyLevel.textContent = `(Level ${difficulty})`;
+    const prefix = currentDirection === 'reverse' ? 'R' : 'L';
+    elements.storyLevel.textContent = `(${prefix}${difficulty})`;
 
     const sentences = splitIntoSentences(story);
     let foundCurrent = false;
@@ -502,7 +509,13 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
         elements.hintBtn.classList.add('hidden');
         elements.translationInput.focus();
     } else {
-        elements.taskPrompt.textContent = 'Translate this sentence:';
+        if (currentDirection === 'reverse') {
+            elements.taskPrompt.textContent = 'Translate to Spanish:';
+            elements.translationInput.placeholder = 'Enter your Spanish translation...';
+        } else {
+            elements.taskPrompt.textContent = 'Translate this sentence:';
+            elements.translationInput.placeholder = 'Enter your English translation...';
+        }
         elements.currentSentence.textContent = sentence;
         elements.hintBtn.classList.remove('hidden');
         elements.translationInput.focus();
@@ -677,6 +690,7 @@ async function loadNextSentence() {
         isWordChallenge = data.is_word_challenge;
         isVocabChallenge = data.is_vocab_challenge;
         isVerbChallenge = data.is_verb_challenge;
+        currentDirection = data.direction || 'normal';
 
         // Update status bar
         const status = await getStatus();
@@ -924,6 +938,20 @@ async function handleDowngrade() {
     }
 }
 
+async function handleSwitchDirection() {
+    try {
+        const data = await api(`/api/switch-direction?user_id=${encodeURIComponent(currentUser)}`, { method: 'POST' });
+        if (data.success) {
+            currentDirection = data.direction;
+            const status = await getStatus();
+            updateStatusBar(status);
+            loadNextSentence();
+        }
+    } catch (e) {
+        alert('Failed to switch direction.');
+    }
+}
+
 function handleNewGame() {
     if (confirm('Start a new game? This will take you back to the name selection screen.')) {
         deleteCookie('tongue_user');
@@ -949,6 +977,7 @@ elements.menuBtn.addEventListener('click', toggleMenu);
 elements.statusBtn.addEventListener('click', () => { closeMenu(); showStatusModal(); });
 elements.masteredBtn.addEventListener('click', () => { closeMenu(); showMasteredModal(); });
 elements.learningBtn.addEventListener('click', () => { closeMenu(); showLearningModal(); });
+elements.switchDirectionBtn.addEventListener('click', () => { closeMenu(); handleSwitchDirection(); });
 elements.downgradeBtn.addEventListener('click', () => { closeMenu(); handleDowngrade(); });
 elements.newGameBtn.addEventListener('click', () => { closeMenu(); handleNewGame(); });
 
