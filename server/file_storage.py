@@ -39,11 +39,8 @@ class FileStorage(Storage):
     def load_state(self, user_id: str = "default") -> dict | None:
         state_file = self._get_state_file(user_id)
         if os.path.exists(state_file):
-            try:
-                with open(state_file, 'r') as f:
-                    return json.load(f)
-            except Exception:
-                return None
+            with open(state_file, 'r') as f:
+                return json.load(f)
         return None
 
     def save_state(self, state: dict, user_id: str = "default") -> None:

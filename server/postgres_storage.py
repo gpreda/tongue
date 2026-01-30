@@ -28,13 +28,22 @@ class PostgresStorage(Storage):
 
     @property
     def conn(self):
-        """Lazy connection initialization."""
+        """Lazy connection initialization with stale connection recovery."""
         if self._conn is None or self._conn.closed:
             self._conn = psycopg2.connect(self.db_url)
             if not self._initialized:
                 self._init_db()
                 self._initialized = True
         return self._conn
+
+    def _reset_conn(self):
+        """Close stale connection so next .conn access reconnects."""
+        try:
+            if self._conn and not self._conn.closed:
+                self._conn.close()
+        except Exception:
+            pass
+        self._conn = None
 
     def _init_db(self):
         """Create tables if they don't exist."""
@@ -215,34 +224,50 @@ class PostgresStorage(Storage):
             return json.load(f)
 
     def load_state(self, user_id: str = "default") -> dict | None:
-        try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "SELECT state FROM user_state WHERE user_id = %s",
-                    (user_id,)
-                )
-                row = cur.fetchone()
-                if row:
-                    return row['state']
-                return None
-        except Exception as e:
-            print(f"Error loading state: {e}")
-            return None
+        for attempt in range(2):
+            try:
+                with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        "SELECT state FROM user_state WHERE user_id = %s",
+                        (user_id,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return row['state']
+                    return None
+            except psycopg2.OperationalError as e:
+                print(f"DB connection error loading state (attempt {attempt + 1}): {e}")
+                self._reset_conn()
+                if attempt == 1:
+                    raise
+            except Exception as e:
+                print(f"Error loading state: {e}")
+                raise
 
     def save_state(self, state: dict, user_id: str = "default") -> None:
-        try:
-            with self.conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO user_state (user_id, state, updated_at)
-                    VALUES (%s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (user_id)
-                    DO UPDATE SET state = EXCLUDED.state, updated_at = CURRENT_TIMESTAMP
-                """, (user_id, json.dumps(state)))
-            self.conn.commit()
-        except Exception as e:
-            print(f"Error saving state: {e}")
-            self.conn.rollback()
-            raise
+        for attempt in range(2):
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO user_state (user_id, state, updated_at)
+                        VALUES (%s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (user_id)
+                        DO UPDATE SET state = EXCLUDED.state, updated_at = CURRENT_TIMESTAMP
+                    """, (user_id, json.dumps(state)))
+                self.conn.commit()
+                return
+            except psycopg2.OperationalError as e:
+                print(f"DB connection error saving state (attempt {attempt + 1}): {e}")
+                self._reset_conn()
+                if attempt == 1:
+                    raise
+            except Exception as e:
+                print(f"Error saving state: {e}")
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    self._reset_conn()
+                raise
 
     def list_users(self) -> list[str]:
         """List all existing user IDs."""

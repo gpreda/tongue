@@ -834,7 +834,7 @@ function showGameScreen() {
 async function handleStartForm(e) {
     e.preventDefault();
 
-    const username = elements.usernameInput.value.trim();
+    const username = elements.usernameInput.value.trim().toLowerCase();
     const pin = elements.pinInput.value.trim();
 
     if (!username) {
@@ -1001,7 +1001,7 @@ document.addEventListener('keydown', (e) => {
 
 // Initialize - check for existing user cookie
 function init() {
-    const savedUser = getCookie('tongue_user');
+    const savedUser = (getCookie('tongue_user') || '').toLowerCase() || null;
     if (savedUser) {
         // Verify user still exists
         checkUserExists(savedUser).then(({ exists }) => {

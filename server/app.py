@@ -244,18 +244,26 @@ async def serve_perf():
 
 
 def get_history(user_id: str = "default") -> History:
-    """Get or create history for a user."""
+    """Get or create history for a user.
+
+    Only creates a new empty History for users that genuinely don't exist yet
+    (just created via create_user). Database errors will propagate as exceptions
+    to prevent overwriting existing data with an empty history.
+    """
+    user_id = user_id.lower()
     if user_id not in user_histories:
-        state = storage.load_state(user_id)
+        state = storage.load_state(user_id)  # Raises on DB error
         if state:
             user_histories[user_id] = History.from_dict(state)
         else:
+            # Only safe because create_user already verified this is a new user
             user_histories[user_id] = History()
     return user_histories[user_id]
 
 
 def save_history(user_id: str = "default") -> None:
     """Save history for a user."""
+    user_id = user_id.lower()
     if user_id in user_histories:
         storage.save_state(user_histories[user_id].to_dict(), user_id)
 
@@ -388,6 +396,7 @@ async def list_users():
 @app.get("/api/users/{user_id}/exists")
 async def check_user_exists(user_id: str):
     """Check if a user exists."""
+    user_id = user_id.lower()
     exists = storage.user_exists(user_id)
     return {"exists": exists}
 
@@ -395,6 +404,7 @@ async def check_user_exists(user_id: str):
 @app.post("/api/users/{user_id}")
 async def create_user(user_id: str, request: CreateUserRequest):
     """Create a new user with a PIN. Returns error if user already exists."""
+    user_id = user_id.lower()
     if storage.user_exists(user_id):
         return {"success": False, "error": "User already exists"}
 
@@ -420,6 +430,7 @@ async def create_user(user_id: str, request: CreateUserRequest):
 @app.post("/api/users/{user_id}/login")
 async def login_user(user_id: str, request: LoginRequest):
     """Login an existing user with PIN verification."""
+    user_id = user_id.lower()
     if not storage.user_exists(user_id):
         return {"success": False, "error": "User not found"}
 
