@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import traceback
+import unicodedata
 import uuid
 from pathlib import Path
 
@@ -31,6 +32,48 @@ from server.postgres_storage import PostgresStorage
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent
 WEB_DIR = PROJECT_ROOT / "web"
+
+
+# Accent-lenient matching helpers
+# Words where accent changes meaning in Spanish (stored as stripped lowercase)
+_ACCENT_MATTERS = {
+    'el', 'tu', 'mi', 'si', 'se', 'de', 'te', 'mas',
+    'que', 'como', 'donde', 'cuando', 'cual', 'quien',
+    'aun', 'solo',
+}
+
+
+def strip_accents(s: str) -> str:
+    """Remove Unicode diacritics (accents) from a string."""
+    nfkd = unicodedata.normalize('NFKD', s)
+    return ''.join(c for c in nfkd if unicodedata.category(c) != 'Mn')
+
+
+def accent_lenient_match(student: str, correct: str, target_is_spanish: bool = True) -> bool:
+    """Check if student matches correct answer, forgiving accent differences.
+
+    For Spanish targets, exact accents are still required on words where
+    the accent changes meaning (e.g. el/él, tu/tú, si/sí).
+    For English targets, accents are always stripped freely.
+    """
+    stripped_student = strip_accents(student.lower())
+    stripped_correct = strip_accents(correct.lower())
+    if stripped_student != stripped_correct:
+        return False
+    # If targeting English, accent differences never matter
+    if not target_is_spanish:
+        return True
+    # For Spanish targets, reject if the word is in the accent-matters list
+    # Check each word in multi-word answers
+    student_words = student.lower().split()
+    correct_words = correct.lower().split()
+    if len(student_words) != len(correct_words):
+        return True  # length mismatch handled by stripped comparison above
+    for sw, cw in zip(student_words, correct_words):
+        stripped_cw = strip_accents(cw)
+        if stripped_cw in _ACCENT_MATTERS and sw != cw:
+            return False
+    return True
 
 
 # Pydantic models for API
@@ -1042,6 +1085,8 @@ async def submit_translation(request: TranslationRequest):
                 if is_reverse:
                     # Reverse: English shown, user types Spanish word
                     is_correct = student_answer.lower() == spanish_word.lower()
+                    if not is_correct:
+                        is_correct = accent_lenient_match(student_answer, spanish_word, target_is_spanish=True)
                     word_results.append({
                         'word': alternatives,  # English shown
                         'correct_answer': spanish_word,  # Spanish expected
@@ -1052,6 +1097,8 @@ async def submit_translation(request: TranslationRequest):
                     # Forward: Spanish shown, user types English translation
                     correct_answers = [t.strip().lower() for t in alternatives.split(',')]
                     is_correct = student_answer.lower() in correct_answers
+                    if not is_correct:
+                        is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=False) for a in correct_answers)
                     word_results.append({
                         'word': spanish_word,  # Spanish shown
                         'correct_answer': alternatives,
@@ -1124,6 +1171,9 @@ async def submit_translation(request: TranslationRequest):
             # Check if translation matches (case-insensitive)
             student_answer = request.translation.strip().lower()
             is_correct = student_answer in correct_answers
+            if not is_correct:
+                target_is_spanish = is_reverse
+                is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=target_is_spanish) for a in correct_answers)
 
             score = 100 if is_correct else 0
             judgement = {
@@ -1200,13 +1250,17 @@ async def submit_translation(request: TranslationRequest):
                     return w[:-1]  # marks -> mark
                 return w
 
-            # Check exact match first, then normalized match
+            # Check exact match first, then normalized match, then accent-lenient
+            target_is_spanish = history.direction == 'reverse'
             is_correct = student_answer in correct_answers
             if not is_correct:
                 # Try normalized comparison (singular/plural tolerance)
                 normalized_student = normalize_word(student_answer)
                 normalized_correct = {normalize_word(a) for a in correct_answers}
                 is_correct = normalized_student in normalized_correct or student_answer in normalized_correct
+            if not is_correct:
+                # Try accent-lenient matching
+                is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=target_is_spanish) for a in correct_answers)
 
             score = 100 if is_correct else 0
             judgement = {
