@@ -1140,31 +1140,42 @@ async def submit_translation(request: TranslationRequest):
             word = current_round.sentence[5:]  # Remove "WORD:" prefix
             logger.info(f"Word challenge for word: {word}")
 
-            # First check persistent storage for translation
-            stored_translation = storage.get_word_translation(word)
-
-            if stored_translation:
-                logger.info(f"Using stored translation: {stored_translation}")
-                correct_translation = stored_translation['translation']
-                word_type = stored_translation['type']
+            if history.direction == 'reverse':
+                # Reverse mode (EN→ES): word is English, correct answer is Spanish
+                # Use translation from word history (which stores Spanish translations in reverse mode)
+                word_info = history.words.get(word, {})
+                correct_translation = word_info.get('translation') or ''
+                word_type = word_info.get('type') or 'unknown'
+                if isinstance(correct_translation, list):
+                    correct_translation = ', '.join(correct_translation)
+                logger.info(f"Reverse word challenge: {word} -> {correct_translation} ({word_type})")
             else:
-                # Query AI for translation and store it
-                logger.info(f"Querying AI for translation of: {word}")
-                ai_result = ai_provider.get_word_translation(word)
-                if ai_result:
-                    correct_translation = ai_result['translation']
-                    word_type = ai_result['type']
-                    # Save to persistent storage
-                    storage.save_word_translation(word, correct_translation, word_type)
-                    logger.info(f"Saved translation: {correct_translation} ({word_type})")
+                # Normal mode (ES→EN): word is Spanish, correct answer is English
+                # First check persistent storage for translation
+                stored_translation = storage.get_word_translation(word)
+
+                if stored_translation:
+                    logger.info(f"Using stored translation: {stored_translation}")
+                    correct_translation = stored_translation['translation']
+                    word_type = stored_translation['type']
                 else:
-                    # Fallback to user's word history if AI fails
-                    word_info = history.words.get(word, {})
-                    correct_translation = word_info.get('translation') or ''
-                    word_type = word_info.get('type') or 'unknown'
-                    # Handle list translations
-                    if isinstance(correct_translation, list):
-                        correct_translation = ', '.join(correct_translation)
+                    # Query AI for translation and store it
+                    logger.info(f"Querying AI for translation of: {word}")
+                    ai_result = ai_provider.get_word_translation(word)
+                    if ai_result:
+                        correct_translation = ai_result['translation']
+                        word_type = ai_result['type']
+                        # Save to persistent storage
+                        storage.save_word_translation(word, correct_translation, word_type)
+                        logger.info(f"Saved translation: {correct_translation} ({word_type})")
+                    else:
+                        # Fallback to user's word history if AI fails
+                        word_info = history.words.get(word, {})
+                        correct_translation = word_info.get('translation') or ''
+                        word_type = word_info.get('type') or 'unknown'
+                        # Handle list translations
+                        if isinstance(correct_translation, list):
+                            correct_translation = ', '.join(correct_translation)
 
             # Parse correct answers (comma-separated)
             correct_answers = [t.strip().lower() for t in correct_translation.split(',')]

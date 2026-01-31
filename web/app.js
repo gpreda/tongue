@@ -503,7 +503,9 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
     } else if (isWordChal && challengeWord) {
         elements.wordChallengeNotice.classList.remove('hidden');
         elements.wordType.textContent = challengeWord.type;
-        elements.taskPrompt.textContent = 'Translate this word:';
+        elements.taskPrompt.textContent = currentDirection === 'reverse'
+            ? 'Type the Spanish word for:'
+            : 'Translate this word:';
         elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
         elements.hintBtn.classList.add('hidden');
