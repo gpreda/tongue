@@ -307,6 +307,13 @@ class GeminiProvider(AIProvider):
                 logger.warning(f"Invalid score type: {type(judgement.get('score'))} = {judgement.get('score')}")
                 judgement['score'] = 50
 
+            # Filter out malformed vocabulary_breakdown entries (each must be a list of 4+)
+            if 'vocabulary_breakdown' in judgement:
+                judgement['vocabulary_breakdown'] = [
+                    entry for entry in judgement['vocabulary_breakdown']
+                    if isinstance(entry, (list, tuple)) and len(entry) >= 4
+                ]
+
         except (SyntaxError, ValueError) as e:
             logger.error(f"Failed to parse judgement: {e}")
             logger.error(f"Raw response:\n{response}")
@@ -333,7 +340,15 @@ class GeminiProvider(AIProvider):
             }
         return (judgement, ms)
 
-    def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal') -> dict | None:
+    def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal', partial_translation: str = '') -> dict | None:
+        partial_section = ''
+        if partial_translation:
+            partial_section = f"""
+            The student's current partial translation: "{partial_translation}"
+            Analyze which words the student has already correctly translated in their partial attempt.
+            Do NOT hint at words they have already correctly translated — focus only on words they are still missing or got wrong.
+"""
+
         if direction == 'reverse':
             # Reverse mode: English sentence, provide Spanish translations
             prompt = f"""
@@ -342,7 +357,7 @@ class GeminiProvider(AIProvider):
             Sentence: "{sentence}"
 
             Already known words (do NOT include these): {', '.join(correct_words[-50:]) if correct_words else 'none'}
-
+            {partial_section}
             Find the most challenging/uncommon noun, verb, and adjective from the sentence.
             Prioritize less common vocabulary that a student would most likely need help with.
             Provide their {LANGUAGE} translations.
@@ -366,7 +381,7 @@ class GeminiProvider(AIProvider):
             Sentence: "{sentence}"
 
             Already known words (do NOT include these): {', '.join(correct_words[-50:]) if correct_words else 'none'}
-
+            {partial_section}
             Find the most challenging/uncommon noun, verb, and adjective from the sentence.
             Prioritize less common vocabulary that a student would most likely need help with.
             AVOID basic/common words like: quiere, tiene, es, está, hay, va, hace, puede, debe, dice, sabe, viene, ser, estar, tener, ir, hacer, poder, deber, decir, saber, venir, el, la, un, una, los, las.

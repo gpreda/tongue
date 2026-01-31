@@ -47,6 +47,7 @@ class TranslationRequest(BaseModel):
 class HintRequest(BaseModel):
     sentence: str
     user_id: str = "default"
+    partial_translation: str = ""
 
 
 class CreateUserRequest(BaseModel):
@@ -804,13 +805,18 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 prev_sentence = ', '.join(spanish_words)
             else:
                 prev_sentence = prev_sentence
-        elif prev_sentence.startswith("VOCAB:"):
+        elif prev_sentence.startswith("VOCABR:") or prev_sentence.startswith("VOCAB:"):
             prev_challenge_type = 'vocab'
+            is_reverse_vocab = prev_sentence.startswith("VOCABR:")
             parts = prev_sentence.split(":", 2)
             if len(parts) == 3:
-                # Look up Spanish word from english key for display
-                item = storage.get_vocab_item_by_english(parts[1], parts[2])
-                prev_sentence = item['word'] if item else parts[2]
+                if is_reverse_vocab:
+                    # Reverse mode: display the English key
+                    prev_sentence = parts[2]
+                else:
+                    # Normal mode: look up Spanish word from english key for display
+                    item = storage.get_vocab_item_by_english(parts[1], parts[2])
+                    prev_sentence = item['word'] if item else parts[2]
             else:
                 prev_sentence = prev_sentence
         elif prev_sentence.startswith("VERB:"):
@@ -1365,7 +1371,7 @@ async def _get_hint_inner(request: HintRequest):
     start_time = time.time()
     history = get_history(request.user_id)
 
-    hint = ai_provider.get_hint(request.sentence, history.correct_words, direction=history.direction)
+    hint = ai_provider.get_hint(request.sentence, history.correct_words, direction=history.direction, partial_translation=request.partial_translation)
 
     # Sanitize hint entries: discard arrays with null/None/"null" values
     def valid_entry(entry):

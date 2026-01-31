@@ -380,6 +380,8 @@ class History:
         hint_words = hint_words or []
 
         for v_breakdown in round.judgement['vocabulary_breakdown']:
+            if not isinstance(v_breakdown, (list, tuple)) or len(v_breakdown) < 4:
+                continue
             word = v_breakdown[0]
             english = v_breakdown[1]
             part_of_speech = (v_breakdown[2] or 'unknown').lower()

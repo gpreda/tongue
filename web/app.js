@@ -262,7 +262,7 @@ async function submitTranslation(sentence, translation, selectedTense = null, tr
 async function getHint(sentence) {
     return api('/api/hint', {
         method: 'POST',
-        body: JSON.stringify({ sentence, user_id: currentUser })
+        body: JSON.stringify({ sentence, user_id: currentUser, partial_translation: elements.translationInput.value.trim() })
     });
 }
 
