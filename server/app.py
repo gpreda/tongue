@@ -899,6 +899,9 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             sentence = parts[2] if len(parts) == 3 else sentence
     elif is_verb_challenge and sentence.startswith("VERB:"):
         sentence = sentence[5:]  # Remove prefix for display
+        # Reverse mode: show English translation, user types Spanish conjugated form
+        if history.direction == 'reverse' and verb_challenge:
+            sentence = verb_challenge.get('translation', sentence)
 
     # Record when this sentence/challenge was served for practice time tracking
     record_served_time(user_id)
@@ -1005,16 +1008,27 @@ async def submit_translation(request: TranslationRequest):
             if not stored:
                 raise HTTPException(status_code=500, detail="Could not analyze verb")
 
-            correct_translation = stored['translation']
+            english_translation = stored['translation']
             correct_tense = stored['tense']
             base_verb = stored.get('base_verb', conjugated_form)
 
-            # Check translation using AI — accepts any English tense form of the verb
             student_answer = request.translation.strip()
-            verb_check = ai_provider.validate_verb_translation(
-                conjugated_form, base_verb, correct_translation, student_answer
-            )
-            translation_correct = verb_check.get('correct', False)
+
+            if history.direction == 'reverse':
+                # Reverse mode (EN→ES): user sees English, types Spanish conjugated form
+                correct_display = conjugated_form
+                sa_lower = student_answer.lower()
+                cf_lower = conjugated_form.lower()
+                translation_correct = sa_lower == cf_lower
+                if not translation_correct:
+                    translation_correct = accent_lenient_match(student_answer, conjugated_form, target_is_spanish=True)
+            else:
+                # Forward mode (ES→EN): user sees Spanish, types English translation
+                correct_display = english_translation
+                verb_check = ai_provider.validate_verb_translation(
+                    conjugated_form, base_verb, english_translation, student_answer
+                )
+                translation_correct = verb_check.get('correct', False)
 
             # Check tense
             selected_tense = (request.selected_tense or '').lower()
@@ -1031,18 +1045,18 @@ async def submit_translation(request: TranslationRequest):
             elif translation_correct:
                 evaluation = f'Translation correct! But the tense is {correct_tense}, not {selected_tense}.'
             elif tense_correct:
-                evaluation = f'Tense correct, but the translation should be: {correct_translation}'
+                evaluation = f'Tense correct, but the translation should be: {correct_display}'
             else:
-                evaluation = f'The translation is "{correct_translation}" and the tense is {correct_tense}.'
+                evaluation = f'The translation is "{correct_display}" and the tense is {correct_tense}.'
 
             judgement = {
                 'score': score,
-                'correct_translation': correct_translation,
+                'correct_translation': correct_display,
                 'correct_tense': correct_tense,
                 'evaluation': evaluation,
                 'translation_correct': translation_correct,
                 'tense_correct': tense_correct,
-                'vocabulary_breakdown': [[conjugated_form, correct_translation, 'verb', translation_correct]]
+                'vocabulary_breakdown': [[conjugated_form, english_translation, 'verb', translation_correct]]
             }
             judge_ms = 0
 

@@ -447,9 +447,13 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
     if (isVerbChal && verbChallenge) {
         elements.verbChallengeNotice.classList.remove('hidden');
         elements.tenseSelectRow.classList.remove('hidden');
-        elements.taskPrompt.textContent = 'Translate this verb:';
+        elements.taskPrompt.textContent = currentDirection === 'reverse'
+            ? 'Type the Spanish verb form:' : 'Translate this verb:';
         elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
+        elements.translationInput.placeholder = currentDirection === 'reverse'
+            ? 'Enter the Spanish verb form...'
+            : 'Enter your English translation...';
         elements.hintBtn.classList.add('hidden');
         elements.translationInput.focus();
     } else if (isVocabChal && vocabChallenge && vocabChallenge.is_multi) {
