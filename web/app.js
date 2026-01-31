@@ -498,6 +498,9 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
             : 'Translate this word:';
         elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
+        elements.translationInput.placeholder = isReverseVocab
+            ? 'Enter your Spanish translation...'
+            : 'Enter your English translation...';
         elements.hintBtn.classList.add('hidden');
         elements.translationInput.focus();
     } else if (isWordChal && challengeWord) {
@@ -508,6 +511,9 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
             : 'Translate this word:';
         elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
+        elements.translationInput.placeholder = currentDirection === 'reverse'
+            ? 'Enter your Spanish translation...'
+            : 'Enter your English translation...';
         elements.hintBtn.classList.add('hidden');
         elements.translationInput.focus();
     } else {
