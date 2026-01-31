@@ -83,6 +83,9 @@ class History:
         # Direction mode: 'normal' (ES→EN) or 'reverse' (EN→ES)
         self.direction = 'normal'
         self._reverse_state = None
+        # Language support
+        self.language = 'es'
+        self._language_states = {}
 
     # Fields that are swapped per-direction (everything except practice_time_seconds)
     _DIRECTION_FIELDS = [
@@ -92,6 +95,9 @@ class History:
         'last_level_changed', 'review_queue', 'vocab_progress',
         'vocab_progress_version', 'challenge_stats'
     ]
+
+    # Fields captured per-language (direction + reverse state + all progress)
+    _LANGUAGE_FIELDS = _DIRECTION_FIELDS + ['direction', '_reverse_state']
 
     def switch_direction(self) -> None:
         """Switch between normal (ES→EN) and reverse (EN→ES) modes.
@@ -131,6 +137,49 @@ class History:
         self._reverse_state = current_state
         self.direction = 'reverse' if self.direction == 'normal' else 'normal'
 
+    def switch_language(self, new_lang: str) -> None:
+        """Switch to a different language, preserving per-language progress.
+        Captures current language state, loads target language state or fresh defaults."""
+        if new_lang == self.language:
+            return
+
+        # Capture current language state
+        current_state = {}
+        for field in self._LANGUAGE_FIELDS:
+            value = getattr(self, field)
+            if field == 'rounds':
+                value = [r.to_dict() for r in value]
+            elif field == 'last_evaluated_round':
+                value = value.to_dict() if value else None
+            elif field == '_reverse_state':
+                value = self._serialize_reverse_state()
+            current_state[field] = value
+        self._language_states[self.language] = current_state
+
+        # Load target language state or fresh defaults
+        target_state = self._language_states.get(new_lang)
+        if target_state:
+            for field in self._LANGUAGE_FIELDS:
+                if field in target_state:
+                    value = target_state[field]
+                    if field == 'rounds':
+                        value = [TongueRound.from_dict(r) for r in value]
+                    elif field == 'last_evaluated_round':
+                        value = TongueRound.from_dict(value) if value else None
+                    setattr(self, field, value)
+                else:
+                    fresh = History()
+                    setattr(self, field, getattr(fresh, field))
+            # Remove loaded state from dict (it's now live)
+            del self._language_states[new_lang]
+        else:
+            # First time switching to this language - fresh defaults
+            fresh = History()
+            for field in self._LANGUAGE_FIELDS:
+                setattr(self, field, getattr(fresh, field))
+
+        self.language = new_lang
+
     def to_dict(self) -> dict:
         return {
             'rounds': [r.to_dict() for r in self.rounds],
@@ -150,7 +199,9 @@ class History:
             'challenge_stats': self.challenge_stats,
             'practice_time_seconds': self.practice_time_seconds,
             'direction': self.direction,
-            '_reverse_state': self._serialize_reverse_state()
+            '_reverse_state': self._serialize_reverse_state(),
+            'language': self.language,
+            '_language_states': self._language_states
         }
 
     def _serialize_reverse_state(self) -> dict | None:
@@ -202,6 +253,8 @@ class History:
         history.practice_time_seconds = data.get('practice_time_seconds', 0)
         history.direction = data.get('direction', 'normal')
         history._reverse_state = data.get('_reverse_state', None)
+        history.language = data.get('language', 'es')
+        history._language_states = data.get('_language_states', {})
         return history
 
     def _migrate_legacy_words(self) -> None:
@@ -597,13 +650,14 @@ class History:
         from core.vocabulary import (get_all_categories, get_random_challenge,
                                      get_multi_word_challenge, MULTI_WORD_CATEGORIES)
 
-        category = random.choice(get_all_categories())
-        reverse = random.random() < 0.2  # 20% en->es, 80% es->en
+        lang = getattr(self, 'language', 'es')
+        category = random.choice(get_all_categories(lang))
+        reverse = random.random() < 0.2  # 20% en->target, 80% target->en
 
         if category in MULTI_WORD_CATEGORIES:
-            return get_multi_word_challenge(category, reverse=reverse)
+            return get_multi_word_challenge(category, reverse=reverse, language=lang)
         else:
-            return get_random_challenge(category, reverse=reverse)
+            return get_random_challenge(category, reverse=reverse, language=lang)
 
     def record_vocab_result(self, category: str, english_key: str, is_correct: bool) -> None:
         """Record result of a vocabulary challenge by english key."""

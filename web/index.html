@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tongue - Spanish Translation Practice</title>
+    <title>Tongue - Translation Practice</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <div class="container">
         <header>
             <h1>Tongue</h1>
-            <p class="subtitle">Spanish Translation Practice</p>
+            <p class="subtitle">Translation Practice</p>
         </header>
 
         <!-- Start Screen -->
@@ -22,6 +22,9 @@
                 <form id="start-form">
                     <input type="text" id="username-input" placeholder="Your name..." autocomplete="off" maxlength="30" required>
                     <input type="password" id="pin-input" placeholder="4-digit PIN..." autocomplete="off" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" required>
+                    <select id="language-select" class="language-select">
+                        <option value="es">Spanish</option>
+                    </select>
                     <div id="username-error" class="error-message hidden"></div>
                     <button type="submit" id="start-btn" class="btn-primary">Start Practice</button>
                 </form>
@@ -48,6 +51,7 @@
                             <button id="mastered-btn">Mastered</button>
                             <button id="learning-btn">Learning</button>
                             <button id="switch-direction-btn">Switch to Reverse</button>
+                            <button id="switch-language-btn">Switch Language</button>
                             <button id="downgrade-btn">Downgrade Level</button>
                             <button id="new-game-btn">New Game</button>
                         </div>
@@ -105,12 +109,6 @@
                         <label for="tense-select">Select tense:</label>
                         <select id="tense-select">
                             <option value="">-- Choose tense --</option>
-                            <option value="present">Present</option>
-                            <option value="preterite">Preterite (Simple Past)</option>
-                            <option value="imperfect">Imperfect</option>
-                            <option value="future">Future</option>
-                            <option value="conditional">Conditional</option>
-                            <option value="subjunctive">Subjunctive</option>
                         </select>
                     </div>
                     <div class="button-row">
@@ -208,6 +206,16 @@
                         <tbody id="learning-tbody"></tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+
+        <!-- Language Switch Modal -->
+        <div id="language-modal" class="modal hidden">
+            <div class="modal-content">
+                <span class="close-btn" data-modal="language-modal">&times;</span>
+                <h2>Switch Language</h2>
+                <p class="modal-subtitle">Your progress for each language is saved independently.</p>
+                <div id="language-options" class="language-options"></div>
             </div>
         </div>
 

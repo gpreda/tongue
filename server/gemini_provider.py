@@ -7,7 +7,17 @@ import time
 import google.generativeai as genai
 
 from core.interfaces import AIProvider
-from core.config import LANGUAGE, MAX_DIFFICULTY, STORY_SENTENCE_COUNT
+from core.config import MAX_DIFFICULTY, STORY_SENTENCE_COUNT
+
+# Default language info (Spanish) used when no language_info is provided
+_DEFAULT_LANGUAGE_INFO = {
+    'code': 'es',
+    'name': 'Español',
+    'english_name': 'Spanish',
+    'script': 'latin',
+    'tenses': ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive'],
+    'accent_words': []
+}
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -127,7 +137,10 @@ class GeminiProvider(AIProvider):
         s = s.replace('true', 'True')
         return s
 
-    def generate_story(self, correct_words: list, difficulty: int, direction: str = 'normal') -> tuple[str, int]:
+    def generate_story(self, correct_words: list, difficulty: int, direction: str = 'normal', language_info: dict = None) -> tuple[str, int]:
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
+        script = lang.get('script', 'latin')
         avoided_words = correct_words[-100:] if len(correct_words) > 100 else correct_words
 
         # Generate random elements for story diversity
@@ -137,26 +150,30 @@ class GeminiProvider(AIProvider):
         season = random.choice(SEASONS)
         letter = random.choice("ABCDEFGHJLMNPRST")
 
+        script_instruction = ""
+        if script == 'cyrillic':
+            script_instruction = f"\n            - IMPORTANT: Write entirely in Cyrillic script. All {lang_name} text must use Cyrillic letters."
+
         # Swap language based on direction
         if direction == 'reverse':
             story_language = 'English'
-            target_language = LANGUAGE
+            target_language = lang_name
             difficulty_description = f"""
             - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
-              The student will translate these English sentences into {LANGUAGE}.
-              The difficulty refers to the {LANGUAGE} translation complexity:
-              Level 1 = use only basic English that translates to simple {LANGUAGE} (present tense, common words like "the cat is big", "I eat food", "she has a house")
-              Level 5 = intermediate (sentences requiring varied {LANGUAGE} vocabulary, multiple tenses)
-              Level 10 = expert (sentences requiring advanced {LANGUAGE}: subjunctive, idioms, complex grammar)
+              The student will translate these English sentences into {lang_name}.
+              The difficulty refers to the {lang_name} translation complexity:
+              Level 1 = use only basic English that translates to simple {lang_name} (present tense, common words like "the cat is big", "I eat food", "she has a house")
+              Level 5 = intermediate (sentences requiring varied {lang_name} vocabulary, multiple tenses)
+              Level 10 = expert (sentences requiring advanced {lang_name}: complex grammar, idioms)
             - IMPORTANT: At level 1, use very simple, short sentences with basic everyday words only. No uncommon nouns like "meadow", "stream", "trail". Stick to: cat, dog, house, food, water, school, friend, family, etc."""
         else:
-            story_language = LANGUAGE
+            story_language = lang_name
             target_language = 'English'
             difficulty_description = f"""
             - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
               Level 1 = beginner (simple vocabulary, present tense, basic grammar)
               Level 5 = intermediate (varied vocabulary, multiple tenses, compound sentences)
-              Level 10 = expert (advanced vocabulary, subjunctive, idioms, complex grammar)"""
+              Level 10 = expert (advanced vocabulary, complex grammar, idioms)"""
 
         prompt = f"""
             Story ID: {seed}
@@ -172,7 +189,7 @@ class GeminiProvider(AIProvider):
             {difficulty_description}
             - Each sentence should be 5-20 words long
             - Use vocabulary and grammar appropriate for level {difficulty}
-            - Try to avoid using these nouns (the student already knows them): {', '.join(avoided_words) if avoided_words else 'none'}
+            - Try to avoid using these nouns (the student already knows them): {', '.join(avoided_words) if avoided_words else 'none'}{script_instruction}
 
             Write only the story text, no titles, no translations, no explanations.
             Each sentence should end with proper punctuation (. ! ?).
@@ -181,7 +198,9 @@ class GeminiProvider(AIProvider):
         self._record_stats('story', ms, token_stats)
         return (text, ms)
 
-    def validate_translation(self, sentence: str, translation: str, story_context: str = None, direction: str = 'normal') -> tuple[dict, int]:
+    def validate_translation(self, sentence: str, translation: str, story_context: str = None, direction: str = 'normal', language_info: dict = None) -> tuple[dict, int]:
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
         context_block = ""
         if story_context:
             context_block = f"""
@@ -192,9 +211,9 @@ class GeminiProvider(AIProvider):
         # Swap source/target language based on direction
         if direction == 'reverse':
             source_language = 'English'
-            target_language = LANGUAGE
+            target_language = lang_name
         else:
-            source_language = LANGUAGE
+            source_language = lang_name
             target_language = 'English'
 
         prompt = f"""
@@ -340,7 +359,9 @@ class GeminiProvider(AIProvider):
             }
         return (judgement, ms)
 
-    def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal', partial_translation: str = '') -> dict | None:
+    def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal', partial_translation: str = '', language_info: dict = None) -> dict | None:
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
         partial_section = ''
         if partial_translation:
             partial_section = f"""
@@ -350,9 +371,9 @@ class GeminiProvider(AIProvider):
 """
 
         if direction == 'reverse':
-            # Reverse mode: English sentence, provide Spanish translations
+            # Reverse mode: English sentence, provide target language translations
             prompt = f"""
-            Analyze this English sentence and provide a hint for translating to {LANGUAGE}:
+            Analyze this English sentence and provide a hint for translating to {lang_name}:
 
             Sentence: "{sentence}"
 
@@ -360,23 +381,23 @@ class GeminiProvider(AIProvider):
             {partial_section}
             Find the most challenging/uncommon noun, verb, and adjective from the sentence.
             Prioritize less common vocabulary that a student would most likely need help with.
-            Provide their {LANGUAGE} translations.
+            Provide their {lang_name} translations.
 
             Respond with ONLY a Python dictionary in this exact format:
             {{
-                'noun': ['english_noun', 'spanish_translation'],
-                'verb': ['english_verb', 'spanish_translation'],
-                'adjective': ['english_adjective', 'spanish_translation']
+                'noun': ['english_noun', '{lang_name.lower()}_translation'],
+                'verb': ['english_verb', '{lang_name.lower()}_translation'],
+                'adjective': ['english_adjective', '{lang_name.lower()}_translation']
             }}
 
             If any part of speech is not available (all are known or not present), use null for that entry:
-            {{'noun': null, 'verb': ['english_verb', 'spanish_translation'], 'adjective': null}}
+            {{'noun': null, 'verb': ['english_verb', '{lang_name.lower()}_translation'], 'adjective': null}}
 
             Return ONLY the dictionary, no other text.
         """
         else:
             prompt = f"""
-            Analyze this {LANGUAGE} sentence and provide a hint for translation:
+            Analyze this {lang_name} sentence and provide a hint for translation:
 
             Sentence: "{sentence}"
 
@@ -384,18 +405,17 @@ class GeminiProvider(AIProvider):
             {partial_section}
             Find the most challenging/uncommon noun, verb, and adjective from the sentence.
             Prioritize less common vocabulary that a student would most likely need help with.
-            AVOID basic/common words like: quiere, tiene, es, está, hay, va, hace, puede, debe, dice, sabe, viene, ser, estar, tener, ir, hacer, poder, deber, decir, saber, venir, el, la, un, una, los, las.
             Provide their English translations.
 
             Respond with ONLY a Python dictionary in this exact format:
             {{
-                'noun': ['spanish_noun', 'english_translation'],
-                'verb': ['spanish_verb', 'english_translation'],
-                'adjective': ['spanish_adjective', 'english_translation']
+                'noun': ['{lang_name.lower()}_noun', 'english_translation'],
+                'verb': ['{lang_name.lower()}_verb', 'english_translation'],
+                'adjective': ['{lang_name.lower()}_adjective', 'english_translation']
             }}
 
             If any part of speech is not available (all are known or not present), use null for that entry:
-            {{'noun': null, 'verb': ['spanish_verb', 'english_translation'], 'adjective': null}}
+            {{'noun': null, 'verb': ['{lang_name.lower()}_verb', 'english_translation'], 'adjective': null}}
 
             Return ONLY the dictionary, no other text.
         """
@@ -428,11 +448,13 @@ class GeminiProvider(AIProvider):
 
             return None
 
-    def get_word_translation(self, word: str) -> dict | None:
-        """Get translation and type for a Spanish word.
+    def get_word_translation(self, word: str, language_info: dict = None) -> dict | None:
+        """Get translation and type for a word in the target language.
         Returns dict with 'translation' and 'type' or None on error."""
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
         prompt = f"""
-            Translate this {LANGUAGE} word to English:
+            Translate this {lang_name} word to English:
 
             Word: "{word}"
 
@@ -473,11 +495,14 @@ class GeminiProvider(AIProvider):
             return None
 
     def validate_verb_translation(self, conjugated_form: str, base_verb: str,
-                                    correct_translation: str, student_answer: str) -> dict:
+                                    correct_translation: str, student_answer: str,
+                                    language_info: dict = None) -> dict:
         """Check if student's answer is a valid translation of the verb, any tense accepted.
         Returns dict with 'translation_correct' (bool) and 'explanation' (str)."""
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
         prompt = f"""
-            A student is translating the Spanish verb "{conjugated_form}" (infinitive: {base_verb}).
+            A student is translating the {lang_name} verb "{conjugated_form}" (infinitive: {base_verb}).
             The expected translation is: "{correct_translation}"
             The student answered: "{student_answer}"
 
@@ -502,35 +527,27 @@ class GeminiProvider(AIProvider):
             logger.error(f"Failed to parse verb validation: {e}")
         return {'correct': False, 'explanation': 'Could not evaluate'}
 
-    def analyze_verb_conjugation(self, conjugated_form: str) -> dict | None:
-        """Analyze a conjugated Spanish verb form.
+    def analyze_verb_conjugation(self, conjugated_form: str, language_info: dict = None) -> dict | None:
+        """Analyze a conjugated verb form.
         Returns dict with base_verb, tense, translation, person or None on error."""
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
+        tenses = lang.get('tenses', ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive'])
+        tense_list_str = ', '.join(tenses)
+
         prompt = f"""
-            Analyze this conjugated {LANGUAGE} verb:
+            Analyze this conjugated {lang_name} verb:
 
             Verb form: "{conjugated_form}"
 
             Identify:
             1. The infinitive (base form) of the verb
-            2. The tense - must be one of: present, preterite, imperfect, future, conditional, subjunctive
+            2. The tense - must be one of: {tense_list_str}
             3. The English translation of this specific conjugated form
             4. The person - must be one of: first_singular, second_singular, third_singular, first_plural, second_plural, third_plural
 
-            IMPORTANT tense definitions:
-            - present: yo hablo, tú hablas, él habla (I speak, you speak, he speaks)
-            - preterite: yo hablé, tú hablaste, él habló (I spoke, you spoke, he spoke) - completed past action
-            - imperfect: yo hablaba, tú hablabas, él hablaba (I was speaking, I used to speak) - ongoing/habitual past
-            - future: yo hablaré, tú hablarás, él hablará (I will speak)
-            - conditional: yo hablaría, tú hablarías, él hablaría (I would speak)
-            - subjunctive: que yo hable, que tú hables, que él hable (that I speak) - subjunctive mood
-
             Respond with ONLY a Python dictionary in this exact format:
             {{'base_verb': 'infinitive', 'tense': 'tense_name', 'translation': 'english', 'person': 'person_code'}}
-
-            Examples:
-            - "corrió" -> {{'base_verb': 'correr', 'tense': 'preterite', 'translation': 'ran, he ran, she ran', 'person': 'third_singular'}}
-            - "hablamos" -> {{'base_verb': 'hablar', 'tense': 'present', 'translation': 'we speak, we talk', 'person': 'first_plural'}}
-            - "comía" -> {{'base_verb': 'comer', 'tense': 'imperfect', 'translation': 'was eating, used to eat', 'person': 'first_singular'}}
 
             Return ONLY the dictionary, no other text.
         """
@@ -553,7 +570,7 @@ class GeminiProvider(AIProvider):
                     return None
 
             # Validate tense is one of expected values
-            valid_tenses = ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive']
+            valid_tenses = tenses
             if result['tense'] not in valid_tenses:
                 logger.warning(f"Invalid tense '{result['tense']}', expected one of {valid_tenses}")
                 # Try to normalize common variations

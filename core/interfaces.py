@@ -7,17 +7,17 @@ class AIProvider(ABC):
     """Abstract base class for AI/LLM provider."""
 
     @abstractmethod
-    def generate_story(self, correct_words: list, difficulty: int, direction: str = 'normal') -> tuple[str, int]:
+    def generate_story(self, correct_words: list, difficulty: int, direction: str = 'normal', language_info: dict = None) -> tuple[str, int]:
         """Generate a story. Returns (story_text, generation_time_ms)."""
         pass
 
     @abstractmethod
-    def validate_translation(self, sentence: str, translation: str, direction: str = 'normal') -> tuple[dict, int]:
+    def validate_translation(self, sentence: str, translation: str, direction: str = 'normal', language_info: dict = None) -> tuple[dict, int]:
         """Validate a translation. Returns (judgement_dict, validation_time_ms)."""
         pass
 
     @abstractmethod
-    def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal') -> dict | None:
+    def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal', language_info: dict = None) -> dict | None:
         """Get a hint for translation. Returns hint dict or None."""
         pass
 
@@ -56,24 +56,24 @@ class Storage(ABC):
         pass
 
     @abstractmethod
-    def get_word_translation(self, word: str) -> dict | None:
+    def get_word_translation(self, word: str, language: str = 'es') -> dict | None:
         """Get stored translation for a word. Returns {translation, type} or None."""
         pass
 
     @abstractmethod
-    def save_word_translation(self, word: str, translation: str, word_type: str) -> None:
+    def save_word_translation(self, word: str, translation: str, word_type: str, language: str = 'es') -> None:
         """Save translation for a word."""
         pass
 
     @abstractmethod
-    def get_verb_conjugation(self, conjugated_form: str) -> dict | None:
+    def get_verb_conjugation(self, conjugated_form: str, language: str = 'es') -> dict | None:
         """Get stored conjugation info for a verb form.
         Returns {base_verb, tense, translation, person} or None."""
         pass
 
     @abstractmethod
     def save_verb_conjugation(self, conjugated_form: str, base_verb: str, tense: str,
-                              translation: str, person: str) -> None:
+                              translation: str, person: str, language: str = 'es') -> None:
         """Save conjugation info for a verb form."""
         pass
 
@@ -108,4 +108,14 @@ class Storage(ABC):
     def get_vocab_item_by_english(self, category: str, english: str, language: str = 'es') -> dict | None:
         """Look up a single vocabulary item by category and english key.
         Returns {english, word, alternatives} or None."""
+        pass
+
+    @abstractmethod
+    def get_languages(self) -> list[dict]:
+        """Get all active languages. Returns list of language info dicts."""
+        pass
+
+    @abstractmethod
+    def get_language(self, code: str) -> dict | None:
+        """Get language info by code. Returns dict or None."""
         pass

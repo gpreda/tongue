@@ -2,18 +2,20 @@ from .models import TongueRound, History
 from .interfaces import AIProvider, Storage
 from .utils import split_into_sentences
 from .config import (
+    DEFAULT_LANGUAGE,
     MIN_DIFFICULTY, MAX_DIFFICULTY,
     ADVANCE_WINDOW_SIZE, ADVANCE_SCORE_THRESHOLD, ADVANCE_REQUIRED_GOOD,
     DEMOTE_SCORE_THRESHOLD, DEMOTE_REQUIRED_POOR,
-    STORY_SENTENCE_COUNT, LANGUAGE
+    STORY_SENTENCE_COUNT
 )
 
 __all__ = [
     'TongueRound', 'History',
     'AIProvider', 'Storage',
     'split_into_sentences',
+    'DEFAULT_LANGUAGE',
     'MIN_DIFFICULTY', 'MAX_DIFFICULTY',
     'ADVANCE_WINDOW_SIZE', 'ADVANCE_SCORE_THRESHOLD', 'ADVANCE_REQUIRED_GOOD',
     'DEMOTE_SCORE_THRESHOLD', 'DEMOTE_REQUIRED_POOR',
-    'STORY_SENTENCE_COUNT', 'LANGUAGE'
+    'STORY_SENTENCE_COUNT'
 ]

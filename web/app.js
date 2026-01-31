@@ -16,6 +16,10 @@ let isMultiVocab = false;     // Track if current task is a multi-word vocab cha
 let isReverseVocab = false;   // Track if current task is reverse direction
 let multiVocabWords = [];     // Array of {word, translation} for multi-word challenges
 let currentDirection = 'normal'; // 'normal' (ES→EN) or 'reverse' (EN→ES)
+let currentLanguageCode = 'es';
+let currentLanguageName = 'Spanish';
+let availableLanguages = [];
+let currentTenses = [];
 
 // Cookie helpers
 function setCookie(name, value, days = 365) {
@@ -117,6 +121,10 @@ const elements = {
 
     learningBtn: document.getElementById('learning-btn'),
     switchDirectionBtn: document.getElementById('switch-direction-btn'),
+    switchLanguageBtn: document.getElementById('switch-language-btn'),
+    languageSelect: document.getElementById('language-select'),
+    languageModal: document.getElementById('language-modal'),
+    languageOptions: document.getElementById('language-options'),
     downgradeBtn: document.getElementById('downgrade-btn'),
     learningModal: document.getElementById('learning-modal'),
     learningCount: document.getElementById('learning-count'),
@@ -221,10 +229,10 @@ async function checkUserExists(userId) {
     return api(`/api/users/${encodeURIComponent(userId)}/exists`);
 }
 
-async function createUser(userId, pin) {
+async function createUser(userId, pin, language = 'es') {
     return api(`/api/users/${encodeURIComponent(userId)}`, {
         method: 'POST',
-        body: JSON.stringify({ pin })
+        body: JSON.stringify({ pin, language })
     });
 }
 
@@ -274,6 +282,16 @@ async function getLearningWords() {
     return api(`/api/learning-words?user_id=${encodeURIComponent(currentUser)}`);
 }
 
+async function getLanguages() {
+    return api('/api/languages');
+}
+
+async function switchLanguage(languageCode) {
+    return api(`/api/switch-language?user_id=${encodeURIComponent(currentUser)}&language=${encodeURIComponent(languageCode)}`, {
+        method: 'POST'
+    });
+}
+
 async function getApiStats() {
     return api('/api/stats');
 }
@@ -321,13 +339,45 @@ async function updateApiStats() {
 function updateStatusBar(status) {
     const dir = status.direction || 'normal';
     currentDirection = dir;
+    currentLanguageCode = status.language_code || 'es';
+    currentLanguageName = status.language || 'Spanish';
+
+    // Update tenses if provided
+    if (status.tenses && status.tenses.length > 0) {
+        currentTenses = status.tenses;
+        updateTenseOptions(status.tenses);
+    }
+
+    const langPrefix = currentLanguageCode !== 'es' ? currentLanguageCode.toUpperCase() + ' ' : '';
     const prefix = dir === 'reverse' ? 'R' : 'L';
-    elements.levelDisplay.textContent = `${prefix}${status.difficulty}`;
+    elements.levelDisplay.textContent = `${langPrefix}${prefix}${status.difficulty}`;
     elements.progressDisplay.textContent = `${status.good_score_count}/7`;
     elements.challengeDisplay.textContent = status.challenge_stats_display || '0/0';
     elements.completedDisplay.textContent = `${status.total_completed}`;
     elements.practiceTimeDisplay.textContent = status.practice_time_display || '0s';
     elements.switchDirectionBtn.textContent = dir === 'reverse' ? 'Switch to Normal' : 'Switch to Reverse';
+}
+
+function updateTenseOptions(tenses) {
+    const select = elements.tenseSelect;
+    // Keep the placeholder option
+    select.innerHTML = '<option value="">-- Choose tense --</option>';
+    const tenseLabels = {
+        'present': 'Present',
+        'preterite': 'Preterite (Simple Past)',
+        'imperfect': 'Imperfect',
+        'future': 'Future',
+        'conditional': 'Conditional',
+        'subjunctive': 'Subjunctive',
+        'past': 'Past',
+        'imperative': 'Imperative'
+    };
+    for (const tense of tenses) {
+        const option = document.createElement('option');
+        option.value = tense;
+        option.textContent = tenseLabels[tense] || tense.charAt(0).toUpperCase() + tense.slice(1);
+        select.appendChild(option);
+    }
 }
 
 function splitIntoSentences(text) {
@@ -448,11 +498,11 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
         elements.verbChallengeNotice.classList.remove('hidden');
         elements.tenseSelectRow.classList.remove('hidden');
         elements.taskPrompt.textContent = currentDirection === 'reverse'
-            ? 'Type the Spanish verb form:' : 'Translate this verb:';
+            ? `Type the ${currentLanguageName} verb form:` : 'Translate this verb:';
         elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
         elements.translationInput.placeholder = currentDirection === 'reverse'
-            ? 'Enter the Spanish verb form...'
+            ? `Enter the ${currentLanguageName} verb form...`
             : 'Enter your English translation...';
         elements.hintBtn.classList.add('hidden');
         elements.translationInput.focus();
@@ -464,9 +514,10 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
 
         elements.vocabChallengeNotice.classList.remove('hidden');
         elements.vocabCategory.textContent = vocabChallenge.category_name;
-        elements.vocabDirection.textContent = isReverseVocab ? 'EN \u2192 ES' : 'ES \u2192 EN';
+        const langCode = currentLanguageCode.toUpperCase();
+        elements.vocabDirection.textContent = isReverseVocab ? `EN \u2192 ${langCode}` : `${langCode} \u2192 EN`;
         elements.taskPrompt.textContent = isReverseVocab
-            ? 'Type the Spanish word for each:'
+            ? `Type the ${currentLanguageName} word for each:`
             : 'Translate each word:';
         elements.currentSentence.classList.add('hidden');
         elements.translationInput.classList.add('hidden');
@@ -485,7 +536,7 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
                 // Forward: show Spanish, expect English
                 wordEl.textContent = isReverseVocab ? item.translation : item.word;
                 inputEl.value = '';
-                inputEl.placeholder = isReverseVocab ? 'Translate to Spanish' : 'Translate to English';
+                inputEl.placeholder = isReverseVocab ? `Translate to ${currentLanguageName}` : 'Translate to English';
                 resultEl.textContent = '';
             }
         }
@@ -496,14 +547,15 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
         isReverseVocab = vocabChallenge.is_reverse || false;
         elements.vocabChallengeNotice.classList.remove('hidden');
         elements.vocabCategory.textContent = vocabChallenge.category_name;
-        elements.vocabDirection.textContent = isReverseVocab ? 'EN \u2192 ES' : 'ES \u2192 EN';
+        const langCode2 = currentLanguageCode.toUpperCase();
+        elements.vocabDirection.textContent = isReverseVocab ? `EN \u2192 ${langCode2}` : `${langCode2} \u2192 EN`;
         elements.taskPrompt.textContent = isReverseVocab
-            ? 'Type the Spanish word for:'
+            ? `Type the ${currentLanguageName} word for:`
             : 'Translate this word:';
         elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
         elements.translationInput.placeholder = isReverseVocab
-            ? 'Enter your Spanish translation...'
+            ? `Enter your ${currentLanguageName} translation...`
             : 'Enter your English translation...';
         elements.hintBtn.classList.add('hidden');
         elements.translationInput.focus();
@@ -511,19 +563,19 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
         elements.wordChallengeNotice.classList.remove('hidden');
         elements.wordType.textContent = challengeWord.type;
         elements.taskPrompt.textContent = currentDirection === 'reverse'
-            ? 'Type the Spanish word for:'
+            ? `Type the ${currentLanguageName} word for:`
             : 'Translate this word:';
         elements.currentSentence.textContent = sentence;
         elements.currentSentence.classList.add('word-challenge');
         elements.translationInput.placeholder = currentDirection === 'reverse'
-            ? 'Enter your Spanish translation...'
+            ? `Enter your ${currentLanguageName} translation...`
             : 'Enter your English translation...';
         elements.hintBtn.classList.add('hidden');
         elements.translationInput.focus();
     } else {
         if (currentDirection === 'reverse') {
-            elements.taskPrompt.textContent = 'Translate to Spanish:';
-            elements.translationInput.placeholder = 'Enter your Spanish translation...';
+            elements.taskPrompt.textContent = `Translate to ${currentLanguageName}:`;
+            elements.translationInput.placeholder = `Enter your ${currentLanguageName} translation...`;
         } else {
             elements.taskPrompt.textContent = 'Translate this sentence:';
             elements.translationInput.placeholder = 'Enter your English translation...';
@@ -860,6 +912,27 @@ function showStartScreen() {
     elements.pinInput.value = '';
     elements.usernameError.classList.add('hidden');
     elements.usernameInput.focus();
+    // Populate language selector for new users
+    populateLoginLanguageSelect();
+}
+
+async function populateLoginLanguageSelect() {
+    try {
+        const data = await getLanguages();
+        availableLanguages = data.languages || [];
+        if (elements.languageSelect && availableLanguages.length > 0) {
+            elements.languageSelect.innerHTML = '';
+            for (const lang of availableLanguages) {
+                const option = document.createElement('option');
+                option.value = lang.code;
+                option.textContent = lang.english_name;
+                if (lang.code === 'es') option.selected = true;
+                elements.languageSelect.appendChild(option);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load languages for selector:', e);
+    }
 }
 
 function showGameScreen() {
@@ -910,8 +983,9 @@ async function handleStartForm(e) {
                 showUsernameError(result.error || 'Invalid PIN');
             }
         } else {
-            // New user - create them with PIN
-            const result = await createUser(username, pin);
+            // New user - create them with selected language
+            const selectedLanguage = elements.languageSelect ? elements.languageSelect.value : 'es';
+            const result = await createUser(username, pin, selectedLanguage);
             if (result.success) {
                 currentUser = username;
                 setCookie('tongue_user', username);
@@ -964,6 +1038,51 @@ async function handleSwitchDirection() {
     }
 }
 
+async function handleSwitchLanguage() {
+    // Populate language options
+    if (availableLanguages.length === 0) {
+        try {
+            const data = await getLanguages();
+            availableLanguages = data.languages || [];
+        } catch (e) {
+            alert('Failed to load languages.');
+            return;
+        }
+    }
+
+    elements.languageOptions.innerHTML = '';
+    for (const lang of availableLanguages) {
+        const btn = document.createElement('button');
+        btn.className = 'language-option-btn';
+        if (lang.code === currentLanguageCode) {
+            btn.classList.add('active');
+        }
+        btn.textContent = `${lang.name} (${lang.english_name})`;
+        btn.addEventListener('click', async () => {
+            if (lang.code === currentLanguageCode) {
+                elements.languageModal.classList.add('hidden');
+                return;
+            }
+            try {
+                const result = await switchLanguage(lang.code);
+                if (result.success) {
+                    elements.languageModal.classList.add('hidden');
+                    const status = await getStatus();
+                    updateStatusBar(status);
+                    loadNextSentence();
+                } else {
+                    alert(result.error || 'Failed to switch language.');
+                }
+            } catch (e) {
+                alert('Failed to switch language.');
+            }
+        });
+        elements.languageOptions.appendChild(btn);
+    }
+
+    elements.languageModal.classList.remove('hidden');
+}
+
 function handleNewGame() {
     if (confirm('Start a new game? This will take you back to the name selection screen.')) {
         deleteCookie('tongue_user');
@@ -990,6 +1109,7 @@ elements.statusBtn.addEventListener('click', () => { closeMenu(); showStatusModa
 elements.masteredBtn.addEventListener('click', () => { closeMenu(); showMasteredModal(); });
 elements.learningBtn.addEventListener('click', () => { closeMenu(); showLearningModal(); });
 elements.switchDirectionBtn.addEventListener('click', () => { closeMenu(); handleSwitchDirection(); });
+elements.switchLanguageBtn.addEventListener('click', () => { closeMenu(); handleSwitchLanguage(); });
 elements.downgradeBtn.addEventListener('click', () => { closeMenu(); handleDowngrade(); });
 elements.newGameBtn.addEventListener('click', () => { closeMenu(); handleNewGame(); });
 
@@ -1035,7 +1155,7 @@ document.querySelectorAll('.close-btn').forEach(btn => {
 });
 
 // Click outside modal to close
-[elements.statusModal, elements.masteredModal, elements.learningModal].forEach(modal => {
+[elements.statusModal, elements.masteredModal, elements.learningModal, elements.languageModal].forEach(modal => {
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
             modal.classList.add('hidden');
@@ -1049,6 +1169,7 @@ document.addEventListener('keydown', (e) => {
         elements.statusModal.classList.add('hidden');
         elements.masteredModal.classList.add('hidden');
         elements.learningModal.classList.add('hidden');
+        elements.languageModal.classList.add('hidden');
     }
 });
 

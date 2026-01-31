@@ -45,13 +45,13 @@ class MockAIProvider(AIProvider):
         """Queue a hint response."""
         self.hints.append(hint)
 
-    def generate_story(self, correct_words: list, difficulty: int) -> tuple[str, int]:
+    def generate_story(self, correct_words: list, difficulty: int, direction: str = 'normal', language_info: dict = None) -> tuple[str, int]:
         self.generate_story_calls.append((correct_words.copy(), difficulty))
         if self.stories:
             return self.stories.pop(0)
         return ("Default story sentence one. Default story sentence two.", 100)
 
-    def validate_translation(self, sentence: str, translation: str) -> tuple[dict, int]:
+    def validate_translation(self, sentence: str, translation: str, direction: str = 'normal', language_info: dict = None) -> tuple[dict, int]:
         self.validate_translation_calls.append((sentence, translation))
         if self.validations:
             return self.validations.pop(0)
@@ -62,7 +62,7 @@ class MockAIProvider(AIProvider):
             'vocabulary_breakdown': []
         }, 50)
 
-    def get_hint(self, sentence: str, correct_words: list) -> dict | None:
+    def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal', language_info: dict = None) -> dict | None:
         self.get_hint_calls.append((sentence, correct_words.copy()))
         if self.hints:
             return self.hints.pop(0)
@@ -107,18 +107,22 @@ class MockStorage(Storage):
     def get_pin_hash(self, user_id: str) -> str | None:
         return self.pins.get(user_id)
 
-    def get_word_translation(self, word: str) -> dict | None:
-        return self.word_translations.get(word)
+    def get_word_translation(self, word: str, language: str = 'es') -> dict | None:
+        key = f"{word}:{language}" if language != 'es' else word
+        return self.word_translations.get(key)
 
-    def save_word_translation(self, word: str, translation: str, word_type: str) -> None:
-        self.word_translations[word] = {'translation': translation, 'type': word_type}
+    def save_word_translation(self, word: str, translation: str, word_type: str, language: str = 'es') -> None:
+        key = f"{word}:{language}" if language != 'es' else word
+        self.word_translations[key] = {'translation': translation, 'type': word_type}
 
-    def get_verb_conjugation(self, conjugated_form: str) -> dict | None:
-        return self.verb_conjugations.get(conjugated_form)
+    def get_verb_conjugation(self, conjugated_form: str, language: str = 'es') -> dict | None:
+        key = f"{conjugated_form}:{language}" if language != 'es' else conjugated_form
+        return self.verb_conjugations.get(key)
 
     def save_verb_conjugation(self, conjugated_form: str, base_verb: str, tense: str,
-                              translation: str, person: str) -> None:
-        self.verb_conjugations[conjugated_form] = {
+                              translation: str, person: str, language: str = 'es') -> None:
+        key = f"{conjugated_form}:{language}" if language != 'es' else conjugated_form
+        self.verb_conjugations[key] = {
             'base_verb': base_verb, 'tense': tense,
             'translation': translation, 'person': person
         }
@@ -150,6 +154,22 @@ class MockStorage(Storage):
         for word, alt in data.items():
             if alt.split(',')[0].strip() == english:
                 return {'english': english, 'word': word, 'alternatives': alt}
+        return None
+
+    def get_languages(self) -> list[dict]:
+        return [
+            {'code': 'es', 'name': 'Español', 'script': 'latin', 'english_name': 'Spanish',
+             'tenses': ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive'],
+             'accent_words': []},
+            {'code': 'sr-latn', 'name': 'Srpski (latinica)', 'script': 'latin', 'english_name': 'Serbian',
+             'tenses': ['present', 'past', 'future', 'imperative', 'conditional'],
+             'accent_words': []}
+        ]
+
+    def get_language(self, code: str) -> dict | None:
+        for lang in self.get_languages():
+            if lang['code'] == code:
+                return lang
         return None
 
 
@@ -257,7 +277,7 @@ class TestHistory(unittest.TestCase):
         history.difficulty = 3
         history.record_score(3, 85)
         history.record_score(3, 90)
-        self.assertEqual(history.level_scores, [85, 90])
+        self.assertEqual(history.level_scores, [[85, 1.0], [90, 1.0]])
 
     def test_record_score_different_level_ignored(self):
         history = History()
@@ -271,59 +291,67 @@ class TestHistory(unittest.TestCase):
         for i in range(10):
             history.record_score(1, 50 + i)
         self.assertEqual(len(history.level_scores), ADVANCE_WINDOW_SIZE)
-        # Should keep the most recent scores
-        self.assertEqual(history.level_scores[-1], 59)
+        # Should keep the most recent scores (stored as [score, credit])
+        self.assertEqual(history.level_scores[-1], [59, 1.0])
 
     def test_get_good_score_count(self):
         history = History()
-        history.level_scores = [90, 85, 70, 95, 60]  # 3 good (>=80)
+        history.level_scores = [[90, 1.0], [85, 1.0], [70, 1.0], [95, 1.0], [60, 1.0]]  # 3 good (>=80)
         self.assertEqual(history.get_good_score_count(), 3)
 
     def test_get_poor_score_count(self):
         history = History()
-        history.level_scores = [40, 45, 70, 30, 60]  # 3 poor (<50)
+        history.level_scores = [[40, 1.0], [45, 1.0], [70, 1.0], [30, 1.0], [60, 1.0]]  # 3 poor (<50)
         self.assertEqual(history.get_poor_score_count(), 3)
 
     def test_check_advancement_success(self):
         history = History()
         history.difficulty = 3
-        history.level_scores = [90, 85, 90, 95, 85]  # 5 good scores
+        # Need ADVANCE_WINDOW_SIZE (10) scores with ADVANCE_REQUIRED_GOOD (7) good ones
+        history.level_scores = [
+            [90, 1.0], [85, 1.0], [90, 1.0], [95, 1.0], [85, 1.0],
+            [90, 1.0], [88, 1.0], [70, 1.0], [60, 1.0], [50, 1.0]
+        ]
         self.assertTrue(history.check_advancement())
 
     def test_check_advancement_not_enough_good(self):
         history = History()
         history.difficulty = 3
-        history.level_scores = [90, 85, 70, 60, 50]  # Only 2 good
+        history.level_scores = [[90, 1.0], [85, 1.0], [70, 1.0], [60, 1.0], [50, 1.0]]  # Only 2 good
         self.assertFalse(history.check_advancement())
 
     def test_check_advancement_at_max_level(self):
         history = History()
         history.difficulty = MAX_DIFFICULTY
-        history.level_scores = [90, 85, 90, 95, 85]
+        history.level_scores = [[90, 1.0], [85, 1.0], [90, 1.0], [95, 1.0], [85, 1.0]]
         self.assertFalse(history.check_advancement())
 
     def test_check_advancement_not_enough_attempts(self):
         history = History()
         history.difficulty = 3
-        history.level_scores = [90, 85, 90]  # Only 3 attempts
+        history.level_scores = [[90, 1.0], [85, 1.0], [90, 1.0]]  # Only 3 attempts
         self.assertFalse(history.check_advancement())
 
     def test_check_demotion_success(self):
         history = History()
         history.difficulty = 5
-        history.level_scores = [30, 40, 45, 35, 60]  # 4 poor scores
+        # Need ADVANCE_WINDOW_SIZE (10) scores with DEMOTE_REQUIRED_POOR (4) poor ones
+        history.level_scores = [
+            [30, 1.0], [40, 1.0], [45, 1.0], [35, 1.0], [60, 1.0],
+            [70, 1.0], [65, 1.0], [55, 1.0], [50, 1.0], [60, 1.0]
+        ]
         self.assertTrue(history.check_demotion())
 
     def test_check_demotion_not_enough_poor(self):
         history = History()
         history.difficulty = 5
-        history.level_scores = [30, 60, 70, 80, 55]  # Only 1 poor
+        history.level_scores = [[30, 1.0], [60, 1.0], [70, 1.0], [80, 1.0], [55, 1.0]]  # Only 1 poor
         self.assertFalse(history.check_demotion())
 
     def test_check_demotion_at_min_level(self):
         history = History()
         history.difficulty = MIN_DIFFICULTY
-        history.level_scores = [30, 40, 45, 35, 20]
+        history.level_scores = [[30, 1.0], [40, 1.0], [45, 1.0], [35, 1.0], [20, 1.0]]
         self.assertFalse(history.check_demotion())
 
     def test_advance_level(self):
@@ -400,18 +428,20 @@ class TestHistory(unittest.TestCase):
         history.story_difficulty = 3
         history.story_generate_ms = 100
 
-        round = history.get_next_sentence()
+        round, is_review = history.get_next_sentence()
 
         self.assertEqual(round.sentence, "First.")
         self.assertEqual(round.difficulty, 3)
+        self.assertFalse(is_review)
         self.assertEqual(len(history.story_sentences), 2)
         self.assertEqual(len(history.rounds), 1)
 
     def test_get_next_sentence_empty(self):
         history = History()
         history.story_sentences = []
-        round = history.get_next_sentence()
+        round, is_review = history.get_next_sentence()
         self.assertIsNone(round)
+        self.assertFalse(is_review)
 
     def test_update_words_correct_noun(self):
         history = History()
@@ -492,6 +522,99 @@ class TestHistory(unittest.TestCase):
         self.assertEqual(restored.current_story, "Test story.")
 
 
+class TestHistorySwitchLanguage(unittest.TestCase):
+    """Tests for History.switch_language method."""
+
+    def test_switch_to_same_language_is_noop(self):
+        history = History()
+        history.language = 'es'
+        history.difficulty = 5
+        history.switch_language('es')
+        self.assertEqual(history.language, 'es')
+        self.assertEqual(history.difficulty, 5)
+
+    def test_switch_to_new_language_resets_progress(self):
+        history = History()
+        history.difficulty = 5
+        history.correct_words = ['casa', 'gato']
+        history.total_completed = 10
+        history.level_scores = [90, 85]
+
+        history.switch_language('sr-latn')
+
+        self.assertEqual(history.language, 'sr-latn')
+        self.assertEqual(history.difficulty, MIN_DIFFICULTY)
+        self.assertEqual(history.correct_words, [])
+        self.assertEqual(history.total_completed, 0)
+        self.assertEqual(history.level_scores, [])
+
+    def test_switch_back_restores_previous_state(self):
+        history = History()
+        history.difficulty = 5
+        history.correct_words = ['casa', 'gato']
+        history.total_completed = 10
+
+        history.switch_language('sr-latn')
+        # Build some Serbian progress
+        history.difficulty = 3
+        history.correct_words = ['pas', 'mačka']
+        history.total_completed = 5
+
+        history.switch_language('es')
+
+        self.assertEqual(history.language, 'es')
+        self.assertEqual(history.difficulty, 5)
+        self.assertEqual(history.correct_words, ['casa', 'gato'])
+        self.assertEqual(history.total_completed, 10)
+
+    def test_switch_preserves_both_directions(self):
+        history = History()
+        history.difficulty = 5
+        history.switch_language('sr-latn')
+        history.switch_language('es')
+
+        # Spanish state should be restored including direction
+        self.assertEqual(history.direction, 'normal')
+        self.assertEqual(history.difficulty, 5)
+
+    def test_serialization_roundtrip_preserves_language_states(self):
+        history = History()
+        history.difficulty = 5
+        history.correct_words = ['casa']
+        history.switch_language('sr-latn')
+        history.difficulty = 3
+
+        data = history.to_dict()
+        restored = History.from_dict(data)
+
+        self.assertEqual(restored.language, 'sr-latn')
+        self.assertEqual(restored.difficulty, 3)
+        # Switch back and verify Spanish state was preserved
+        restored.switch_language('es')
+        self.assertEqual(restored.difficulty, 5)
+        self.assertIn('casa', restored.correct_words)
+
+    def test_switch_multiple_languages(self):
+        history = History()
+        history.difficulty = 5  # Spanish
+
+        history.switch_language('sr-latn')
+        history.difficulty = 3  # Serbian Latin
+
+        history.switch_language('sr-cyrl')
+        history.difficulty = 2  # Serbian Cyrillic
+
+        # Switch back to each and verify
+        history.switch_language('sr-latn')
+        self.assertEqual(history.difficulty, 3)
+
+        history.switch_language('es')
+        self.assertEqual(history.difficulty, 5)
+
+        history.switch_language('sr-cyrl')
+        self.assertEqual(history.difficulty, 2)
+
+
 class TestHistoryProcessEvaluation(unittest.TestCase):
     """Tests for History.process_evaluation method."""
 
@@ -512,14 +635,18 @@ class TestHistoryProcessEvaluation(unittest.TestCase):
 
         self.assertTrue(round.evaluated)
         self.assertEqual(round.judge_ms, 50)
-        self.assertIn(85, history.level_scores)
+        self.assertIn([85, 1.0], history.level_scores)
         self.assertEqual(history.total_completed, 1)
         self.assertFalse(result['level_changed'])
 
     def test_process_evaluation_triggers_advancement(self):
         history = History()
         history.difficulty = 3
-        history.level_scores = [90, 85, 90, 95]  # 4 good, need 1 more
+        # 9 scores (6 good), adding 1 more good = 7 good out of 10 -> advance
+        history.level_scores = [
+            [90, 1.0], [85, 1.0], [90, 1.0], [95, 1.0], [85, 1.0],
+            [88, 1.0], [70, 1.0], [60, 1.0], [50, 1.0]
+        ]
 
         round = TongueRound("Test", 3, 100)
         round.translation = "Test"
@@ -540,7 +667,11 @@ class TestHistoryProcessEvaluation(unittest.TestCase):
     def test_process_evaluation_triggers_demotion(self):
         history = History()
         history.difficulty = 5
-        history.level_scores = [40, 30, 45, 35]  # 4 poor, need 1 more
+        # 9 scores (3 poor), adding 1 more poor = 4 poor out of 10 -> demote
+        history.level_scores = [
+            [40, 1.0], [30, 1.0], [45, 1.0], [60, 1.0], [70, 1.0],
+            [65, 1.0], [55, 1.0], [50, 1.0], [60, 1.0]
+        ]
 
         round = TongueRound("Test", 5, 100)
         round.translation = "Wrong"
@@ -624,11 +755,13 @@ class TestGeminiProviderSanitize(unittest.TestCase):
         from unittest.mock import patch
 
         provider = GeminiProvider.__new__(GeminiProvider)
+        token_stats = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
 
         # Mock _execute_chat to return malformed response
-        with patch.object(provider, '_execute_chat', return_value=("This is not valid JSON or dict", 100)):
+        with patch.object(provider, '_execute_chat', return_value=("This is not valid JSON or dict", 100, token_stats)):
             with patch.object(provider, '_sanitize_judgement', return_value="invalid python"):
-                judgement, ms = provider.validate_translation("Hola", "Hello")
+                with patch.object(provider, '_record_stats'):
+                    judgement, ms = provider.validate_translation("Hola", "Hello")
 
         # Should return fallback response
         self.assertEqual(judgement['score'], 50)
@@ -641,12 +774,14 @@ class TestGeminiProviderSanitize(unittest.TestCase):
         from unittest.mock import patch
 
         provider = GeminiProvider.__new__(GeminiProvider)
+        token_stats = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
 
         valid_dict = "{'score': 95, 'correct_translation': 'Hello world', 'evaluation': 'Excellent', 'vocabulary_breakdown': []}"
 
-        with patch.object(provider, '_execute_chat', return_value=(valid_dict, 100)):
+        with patch.object(provider, '_execute_chat', return_value=(valid_dict, 100, token_stats)):
             with patch.object(provider, '_sanitize_judgement', return_value=valid_dict):
-                judgement, ms = provider.validate_translation("Hola mundo", "Hello world")
+                with patch.object(provider, '_record_stats'):
+                    judgement, ms = provider.validate_translation("Hola mundo", "Hello world")
 
         self.assertEqual(judgement['score'], 95)
         self.assertEqual(judgement['correct_translation'], 'Hello world')

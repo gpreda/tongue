@@ -73,25 +73,87 @@ class PostgresStorage(Storage):
                     END IF;
                 END $$;
             """)
+            # Languages table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS languages (
+                    code VARCHAR(10) PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    script VARCHAR(20) NOT NULL DEFAULT 'latin',
+                    english_name VARCHAR(100) NOT NULL,
+                    tenses JSONB,
+                    accent_words JSONB,
+                    active BOOLEAN NOT NULL DEFAULT TRUE
+                )
+            """)
+            # Seed default languages
+            cur.execute("""
+                INSERT INTO languages (code, name, script, english_name, tenses, accent_words, active)
+                VALUES
+                    ('es', 'Español', 'latin', 'Spanish',
+                     '["present", "preterite", "imperfect", "future", "conditional", "subjunctive"]'::jsonb,
+                     '["el", "tu", "mi", "si", "se", "de", "te", "mas", "que", "como", "donde", "cuando", "cual", "quien", "aun", "solo"]'::jsonb,
+                     TRUE),
+                    ('sr-latn', 'Srpski (latinica)', 'latin', 'Serbian',
+                     '["present", "past", "future", "imperative", "conditional"]'::jsonb,
+                     '[]'::jsonb,
+                     TRUE),
+                    ('sr-cyrl', 'Српски (ћирилица)', 'cyrillic', 'Serbian',
+                     '["present", "past", "future", "imperative", "conditional"]'::jsonb,
+                     '[]'::jsonb,
+                     TRUE)
+                ON CONFLICT (code) DO NOTHING
+            """)
             # Word translations table (shared across all users)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS word_translations (
-                    word VARCHAR(255) PRIMARY KEY,
+                    word VARCHAR(255) NOT NULL,
+                    language VARCHAR(10) NOT NULL DEFAULT 'es',
                     translation VARCHAR(500) NOT NULL,
                     word_type VARCHAR(50) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (word, language)
                 )
+            """)
+            # Add language column if it doesn't exist (for existing databases)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'word_translations' AND column_name = 'language'
+                    ) THEN
+                        ALTER TABLE word_translations ADD COLUMN language VARCHAR(10) NOT NULL DEFAULT 'es';
+                        ALTER TABLE word_translations DROP CONSTRAINT IF EXISTS word_translations_pkey;
+                        ALTER TABLE word_translations ADD PRIMARY KEY (word, language);
+                    END IF;
+                END $$;
             """)
             # Verb conjugations table (shared across all users)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS verb_conjugations (
-                    conjugated_form VARCHAR(255) PRIMARY KEY,
+                    conjugated_form VARCHAR(255) NOT NULL,
+                    language VARCHAR(10) NOT NULL DEFAULT 'es',
                     base_verb VARCHAR(255) NOT NULL,
                     tense VARCHAR(50) NOT NULL,
                     translation VARCHAR(500) NOT NULL,
                     person VARCHAR(50) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (conjugated_form, language)
                 )
+            """)
+            # Add language column if it doesn't exist (for existing databases)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'verb_conjugations' AND column_name = 'language'
+                    ) THEN
+                        ALTER TABLE verb_conjugations ADD COLUMN language VARCHAR(10) NOT NULL DEFAULT 'es';
+                        ALTER TABLE verb_conjugations DROP CONSTRAINT IF EXISTS verb_conjugations_pkey;
+                        ALTER TABLE verb_conjugations ADD PRIMARY KEY (conjugated_form, language);
+                    END IF;
+                END $$;
             """)
             # Events log table
             cur.execute("""
@@ -355,13 +417,13 @@ class PostgresStorage(Storage):
             print(f"Error getting PIN hash: {e}")
             return None
 
-    def get_word_translation(self, word: str) -> dict | None:
+    def get_word_translation(self, word: str, language: str = 'es') -> dict | None:
         """Get stored translation for a word."""
         try:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT translation, word_type FROM word_translations WHERE word = %s",
-                    (word,)
+                    "SELECT translation, word_type FROM word_translations WHERE word = %s AND language = %s",
+                    (word, language)
                 )
                 row = cur.fetchone()
                 if row:
@@ -374,31 +436,31 @@ class PostgresStorage(Storage):
             print(f"Error getting word translation: {e}")
             return None
 
-    def save_word_translation(self, word: str, translation: str, word_type: str) -> None:
+    def save_word_translation(self, word: str, translation: str, word_type: str, language: str = 'es') -> None:
         """Save translation for a word."""
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO word_translations (word, translation, word_type)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (word) DO UPDATE SET
+                    INSERT INTO word_translations (word, language, translation, word_type)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (word, language) DO UPDATE SET
                         translation = EXCLUDED.translation,
                         word_type = EXCLUDED.word_type
-                """, (word, translation, word_type))
+                """, (word, language, translation, word_type))
             self.conn.commit()
         except Exception as e:
             print(f"Error saving word translation: {e}")
             self.conn.rollback()
             raise
 
-    def get_verb_conjugation(self, conjugated_form: str) -> dict | None:
+    def get_verb_conjugation(self, conjugated_form: str, language: str = 'es') -> dict | None:
         """Get stored conjugation info for a verb form."""
         try:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """SELECT base_verb, tense, translation, person
-                       FROM verb_conjugations WHERE conjugated_form = %s""",
-                    (conjugated_form,)
+                       FROM verb_conjugations WHERE conjugated_form = %s AND language = %s""",
+                    (conjugated_form, language)
                 )
                 row = cur.fetchone()
                 if row:
@@ -414,7 +476,7 @@ class PostgresStorage(Storage):
             return None
 
     def save_verb_conjugation(self, conjugated_form: str, base_verb: str, tense: str,
-                              translation: str, person: str) -> None:
+                              translation: str, person: str, language: str = 'es') -> None:
         """Save conjugation info for a verb form."""
         # Use 'n/a' for infinitives and other forms without grammatical person
         if person is None:
@@ -422,14 +484,14 @@ class PostgresStorage(Storage):
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO verb_conjugations (conjugated_form, base_verb, tense, translation, person)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (conjugated_form) DO UPDATE SET
+                    INSERT INTO verb_conjugations (conjugated_form, language, base_verb, tense, translation, person)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (conjugated_form, language) DO UPDATE SET
                         base_verb = EXCLUDED.base_verb,
                         tense = EXCLUDED.tense,
                         translation = EXCLUDED.translation,
                         person = EXCLUDED.person
-                """, (conjugated_form, base_verb, tense, translation, person))
+                """, (conjugated_form, language, base_verb, tense, translation, person))
             self.conn.commit()
         except Exception as e:
             print(f"Error saving verb conjugation: {e}")
@@ -721,13 +783,16 @@ class PostgresStorage(Storage):
     # Vocabulary storage methods
 
     def seed_vocabulary(self, items: list[dict]) -> None:
-        """Seed vocabulary items into the database if the table is empty."""
+        """Seed vocabulary items into the database if not already seeded for this language."""
+        if not items:
+            return
+        language = items[0].get('language', 'es')
         try:
             with self.conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM vocabulary_items")
+                cur.execute("SELECT COUNT(*) FROM vocabulary_items WHERE language = %s", (language,))
                 count = cur.fetchone()[0]
                 if count > 0:
-                    return  # Already seeded
+                    return  # Already seeded for this language
 
                 for item in items:
                     cur.execute("""
@@ -737,7 +802,7 @@ class PostgresStorage(Storage):
                     """, (item['category'], item['english'], item['word'],
                           item['language'], item['alternatives']))
             self.conn.commit()
-            print(f"Seeded {len(items)} vocabulary items")
+            print(f"Seeded {len(items)} vocabulary items for language '{language}'")
         except Exception as e:
             print(f"Error seeding vocabulary: {e}")
             self.conn.rollback()
@@ -784,4 +849,32 @@ class PostgresStorage(Storage):
                 return dict(row) if row else None
         except Exception as e:
             print(f"Error getting vocab item by english: {e}")
+            return None
+
+    def get_languages(self) -> list[dict]:
+        """Get all active languages."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT code, name, script, english_name, tenses, accent_words
+                       FROM languages WHERE active = TRUE ORDER BY code"""
+                )
+                return [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"Error getting languages: {e}")
+            return []
+
+    def get_language(self, code: str) -> dict | None:
+        """Get language info by code."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT code, name, script, english_name, tenses, accent_words
+                       FROM languages WHERE code = %s""",
+                    (code,)
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            print(f"Error getting language: {e}")
             return None

@@ -1,6 +1,6 @@
 """Configuration constants for tongue application."""
 
-LANGUAGE = 'Spanish'
+DEFAULT_LANGUAGE = 'es'
 MIN_DIFFICULTY = 1
 MAX_DIFFICULTY = 10
 

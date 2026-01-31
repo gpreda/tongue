@@ -151,20 +151,25 @@ class FileStorage(Storage):
         with open(trans_file, 'w') as f:
             json.dump(translations, f, indent=2)
 
-    def get_word_translation(self, word: str) -> dict | None:
+    def get_word_translation(self, word: str, language: str = 'es') -> dict | None:
         """Get stored translation for a word."""
         try:
             translations = self._load_translations()
-            return translations.get(word)
+            key = f"{word}:{language}" if language != 'es' else word
+            result = translations.get(key)
+            if not result and language != 'es':
+                result = translations.get(word)  # Fallback for legacy data
+            return result
         except Exception as e:
             print(f"Error getting word translation: {e}")
             return None
 
-    def save_word_translation(self, word: str, translation: str, word_type: str) -> None:
+    def save_word_translation(self, word: str, translation: str, word_type: str, language: str = 'es') -> None:
         """Save translation for a word."""
         try:
             translations = self._load_translations()
-            translations[word] = {
+            key = f"{word}:{language}" if language != 'es' else word
+            translations[key] = {
                 'translation': translation,
                 'type': word_type
             }
@@ -194,24 +199,29 @@ class FileStorage(Storage):
         with open(conj_file, 'w') as f:
             json.dump(conjugations, f, indent=2)
 
-    def get_verb_conjugation(self, conjugated_form: str) -> dict | None:
+    def get_verb_conjugation(self, conjugated_form: str, language: str = 'es') -> dict | None:
         """Get stored conjugation info for a verb form."""
         try:
             conjugations = self._load_conjugations()
-            return conjugations.get(conjugated_form)
+            key = f"{conjugated_form}:{language}" if language != 'es' else conjugated_form
+            result = conjugations.get(key)
+            if not result and language != 'es':
+                result = conjugations.get(conjugated_form)  # Fallback for legacy data
+            return result
         except Exception as e:
             print(f"Error getting verb conjugation: {e}")
             return None
 
     def save_verb_conjugation(self, conjugated_form: str, base_verb: str, tense: str,
-                              translation: str, person: str) -> None:
+                              translation: str, person: str, language: str = 'es') -> None:
         """Save conjugation info for a verb form."""
         # Use 'n/a' for infinitives and other forms without grammatical person
         if person is None:
             person = 'n/a'
         try:
             conjugations = self._load_conjugations()
-            conjugations[conjugated_form] = {
+            key = f"{conjugated_form}:{language}" if language != 'es' else conjugated_form
+            conjugations[key] = {
                 'base_verb': base_verb,
                 'tense': tense,
                 'translation': translation,
@@ -270,13 +280,15 @@ class FileStorage(Storage):
 
     def get_vocab_categories(self, language: str = 'es') -> list[str]:
         """Get distinct vocabulary categories from static dict."""
-        from core.vocabulary import VOCABULARY_CHALLENGES
-        return list(VOCABULARY_CHALLENGES.keys())
+        from core.vocabulary import _get_vocab_dict
+        vocab = _get_vocab_dict(language)
+        return list(vocab.keys())
 
     def get_vocab_category_items(self, category: str, language: str = 'es') -> list[dict]:
         """Get vocabulary items for a category from static dict."""
-        from core.vocabulary import VOCABULARY_CHALLENGES
-        data = VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+        from core.vocabulary import _get_vocab_dict
+        vocab = _get_vocab_dict(language)
+        data = vocab.get(category, {}).get('items', {})
         result = []
         for word, alternatives in data.items():
             english = alternatives.split(',')[0].strip()
@@ -289,8 +301,9 @@ class FileStorage(Storage):
 
     def get_vocab_item_by_english(self, category: str, english: str, language: str = 'es') -> dict | None:
         """Look up a single vocabulary item by category and english key from static dict."""
-        from core.vocabulary import VOCABULARY_CHALLENGES
-        data = VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+        from core.vocabulary import _get_vocab_dict
+        vocab = _get_vocab_dict(language)
+        data = vocab.get(category, {}).get('items', {})
         for word, alternatives in data.items():
             key = alternatives.split(',')[0].strip()
             if key == english:
@@ -299,4 +312,43 @@ class FileStorage(Storage):
                     'word': word,
                     'alternatives': alternatives
                 }
+        return None
+
+    _LANGUAGES = [
+        {
+            'code': 'es',
+            'name': 'Español',
+            'script': 'latin',
+            'english_name': 'Spanish',
+            'tenses': ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive'],
+            'accent_words': ['el', 'tu', 'mi', 'si', 'se', 'de', 'te', 'mas',
+                             'que', 'como', 'donde', 'cuando', 'cual', 'quien', 'aun', 'solo']
+        },
+        {
+            'code': 'sr-latn',
+            'name': 'Srpski (latinica)',
+            'script': 'latin',
+            'english_name': 'Serbian',
+            'tenses': ['present', 'past', 'future', 'imperative', 'conditional'],
+            'accent_words': []
+        },
+        {
+            'code': 'sr-cyrl',
+            'name': 'Српски (ћирилица)',
+            'script': 'cyrillic',
+            'english_name': 'Serbian',
+            'tenses': ['present', 'past', 'future', 'imperative', 'conditional'],
+            'accent_words': []
+        }
+    ]
+
+    def get_languages(self) -> list[dict]:
+        """Get all active languages."""
+        return self._LANGUAGES
+
+    def get_language(self, code: str) -> dict | None:
+        """Get language info by code."""
+        for lang in self._LANGUAGES:
+            if lang['code'] == code:
+                return lang
         return None

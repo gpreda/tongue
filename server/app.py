@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 from core.models import History, TongueRound
 from core.config import (
-    LANGUAGE, MIN_DIFFICULTY, MAX_DIFFICULTY,
+    DEFAULT_LANGUAGE, MIN_DIFFICULTY, MAX_DIFFICULTY,
     ADVANCE_SCORE_THRESHOLD, ADVANCE_REQUIRED_GOOD, ADVANCE_WINDOW_SIZE,
     DEMOTE_SCORE_THRESHOLD, DEMOTE_REQUIRED_POOR, STORY_SENTENCE_COUNT
 )
@@ -34,9 +34,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 WEB_DIR = PROJECT_ROOT / "web"
 
 
-# Accent-lenient matching helpers
-# Words where accent changes meaning in Spanish (stored as stripped lowercase)
-_ACCENT_MATTERS = {
+# Default accent-matters words (Spanish), used as fallback
+_DEFAULT_ACCENT_WORDS = {
     'el', 'tu', 'mi', 'si', 'se', 'de', 'te', 'mas',
     'que', 'como', 'donde', 'cuando', 'cual', 'quien',
     'aun', 'solo',
@@ -49,11 +48,26 @@ def strip_accents(s: str) -> str:
     return ''.join(c for c in nfkd if unicodedata.category(c) != 'Mn')
 
 
-def accent_lenient_match(student: str, correct: str, target_is_spanish: bool = True) -> bool:
+def validate_script(text: str, expected_script: str) -> bool:
+    """Check if text uses the expected script (cyrillic or latin).
+    Returns True if the text passes validation."""
+    alpha = [c for c in text if c.isalpha()]
+    if not alpha:
+        return True
+    cyrillic = sum(1 for c in alpha if 'CYRILLIC' in unicodedata.name(c, ''))
+    if expected_script == 'cyrillic':
+        return cyrillic / len(alpha) > 0.5
+    if expected_script == 'latin':
+        return cyrillic / len(alpha) < 0.5
+    return True
+
+
+def accent_lenient_match(student: str, correct: str, target_is_spanish: bool = True,
+                         accent_words: set = None) -> bool:
     """Check if student matches correct answer, forgiving accent differences.
 
-    For Spanish targets, exact accents are still required on words where
-    the accent changes meaning (e.g. el/él, tu/tú, si/sí).
+    For target language, exact accents are still required on words where
+    the accent changes meaning.
     For English targets, accents are always stripped freely.
     """
     stripped_student = strip_accents(student.lower())
@@ -63,17 +77,56 @@ def accent_lenient_match(student: str, correct: str, target_is_spanish: bool = T
     # If targeting English, accent differences never matter
     if not target_is_spanish:
         return True
-    # For Spanish targets, reject if the word is in the accent-matters list
-    # Check each word in multi-word answers
+    # For target language, reject if the word is in the accent-matters list
+    accent_set = accent_words if accent_words is not None else _DEFAULT_ACCENT_WORDS
     student_words = student.lower().split()
-    correct_words = correct.lower().split()
-    if len(student_words) != len(correct_words):
+    correct_words_list = correct.lower().split()
+    if len(student_words) != len(correct_words_list):
         return True  # length mismatch handled by stripped comparison above
-    for sw, cw in zip(student_words, correct_words):
+    for sw, cw in zip(student_words, correct_words_list):
         stripped_cw = strip_accents(cw)
-        if stripped_cw in _ACCENT_MATTERS and sw != cw:
+        if stripped_cw in accent_set and sw != cw:
             return False
     return True
+
+
+# Language info cache
+_language_cache: dict[str, dict] = {}
+
+
+def get_language_info(lang_code: str) -> dict | None:
+    """Get language info from DB with in-memory cache."""
+    if lang_code in _language_cache:
+        return _language_cache[lang_code]
+    if storage:
+        info = storage.get_language(lang_code)
+        if info:
+            _language_cache[lang_code] = info
+            return info
+    return None
+
+
+def get_user_language_info(user_id: str) -> dict:
+    """Get language info for user's current language."""
+    history = get_history(user_id)
+    info = get_language_info(history.language)
+    if info:
+        return info
+    # Fallback to Spanish defaults
+    return {
+        'code': 'es', 'name': 'Español', 'script': 'latin',
+        'english_name': 'Spanish',
+        'tenses': ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive'],
+        'accent_words': list(_DEFAULT_ACCENT_WORDS)
+    }
+
+
+def get_accent_words_set(language_info: dict) -> set:
+    """Get accent words as a set from language info."""
+    words = language_info.get('accent_words', [])
+    if isinstance(words, list):
+        return set(words)
+    return set()
 
 
 # Pydantic models for API
@@ -95,6 +148,7 @@ class HintRequest(BaseModel):
 
 class CreateUserRequest(BaseModel):
     pin: str
+    language: str = 'es'
 
 
 class LoginRequest(BaseModel):
@@ -138,6 +192,7 @@ class HintResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     language: str
+    language_code: str = 'es'
     difficulty: int
     max_difficulty: int
     total_completed: int
@@ -154,6 +209,7 @@ class StatusResponse(BaseModel):
     practice_time_seconds: int
     practice_time_display: str  # Human-readable format like "2h 15m"
     direction: str = 'normal'  # 'normal' (ES→EN) or 'reverse' (EN→ES)
+    tenses: list[str] = []  # Available tenses for current language
 
 
 class NextSentenceResponse(BaseModel):
@@ -172,10 +228,6 @@ class NextSentenceResponse(BaseModel):
     has_previous_evaluation: bool
     previous_evaluation: Optional[dict]
     direction: str = 'normal'
-
-
-# Valid tenses for verb challenges
-VALID_TENSES = ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive']
 
 
 # Global state (in production, use proper DI)
@@ -253,7 +305,7 @@ def log_event(event: str, user_id: str, **data) -> None:
                           **data)
 
 
-app = FastAPI(title="Tongue API", description="Spanish translation practice API")
+app = FastAPI(title="Tongue API", description="Multi-language translation practice API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -314,7 +366,7 @@ def save_history(user_id: str = "default") -> None:
         storage.save_state(user_histories[user_id].to_dict(), user_id)
 
 
-async def generate_story_background(user_id: str, correct_words: list, difficulty: int, direction: str = 'normal') -> None:
+async def generate_story_background(user_id: str, correct_words: list, difficulty: int, direction: str = 'normal', language_info: dict = None) -> None:
     """Generate a story in the background for a user."""
     # Get or create lock for this user
     if user_id not in story_generation_locks:
@@ -334,9 +386,10 @@ async def generate_story_background(user_id: str, correct_words: list, difficult
         try:
             # Run in executor to not block the event loop
             loop = asyncio.get_event_loop()
+            li = language_info
             story, ms = await loop.run_in_executor(
                 None,
-                lambda: story_provider.generate_story(correct_words, difficulty, direction)
+                lambda: story_provider.generate_story(correct_words, difficulty, direction, language_info=li)
             )
             story_ai = story_provider.get_last_call_info()
             pending_stories[user_id] = {
@@ -381,8 +434,9 @@ def trigger_background_story(user_id: str, history: History) -> None:
     # Only trigger if user might need a new story soon
     # (less than 3 sentences remaining or no story)
     if len(history.story_sentences) < 3 or history.needs_new_story():
+        lang_info = get_user_language_info(user_id)
         asyncio.create_task(
-            generate_story_background(user_id, history.correct_words, history.difficulty, history.direction)
+            generate_story_background(user_id, history.correct_words, history.difficulty, history.direction, language_info=lang_info)
         )
 
 
@@ -421,11 +475,15 @@ async def startup():
     story_provider = GeminiProvider(api_key, model_name='gemini-2.5-pro', storage=storage)
     print("AI providers initialized: gemini-2.0-flash (validation), gemini-2.5-pro (stories)")
 
-    # Initialize vocabulary storage and seed DB
+    # Initialize vocabulary storage and seed DB for all active languages
     from core.vocabulary import init_storage as vocab_init_storage, get_seed_data
     vocab_init_storage(storage)
-    storage.seed_vocabulary(get_seed_data())
-    print("Vocabulary storage initialized and seeded")
+    languages = storage.get_languages()
+    for lang in languages:
+        seed_data = get_seed_data(lang['code'])
+        if seed_data:
+            storage.seed_vocabulary(seed_data)
+    print(f"Vocabulary storage initialized and seeded for {len(languages)} languages")
 
 
 @app.get("/")
@@ -463,8 +521,15 @@ async def create_user(user_id: str, request: CreateUserRequest):
     if not request.pin or len(request.pin) != 4 or not request.pin.isdigit():
         return {"success": False, "error": "PIN must be exactly 4 digits"}
 
-    # Create empty history for new user
+    # Create empty history for new user with selected language
     history = History()
+    lang_code = request.language or DEFAULT_LANGUAGE
+    # Validate language exists
+    lang_info = get_language_info(lang_code)
+    if lang_info:
+        history.language = lang_code
+    else:
+        history.language = DEFAULT_LANGUAGE
     user_histories[user_id] = history
     save_history(user_id)
 
@@ -473,7 +538,7 @@ async def create_user(user_id: str, request: CreateUserRequest):
 
     # Log user creation and start new session
     session_id = new_session(user_id)
-    log_event('user.create', user_id)
+    log_event('user.create', user_id, language=history.language)
 
     return {"success": True, "user_id": user_id}
 
@@ -509,14 +574,51 @@ async def login_user(user_id: str, request: LoginRequest):
     return {"success": True, "user_id": user_id}
 
 
+@app.get("/api/languages")
+async def list_languages():
+    """List all active languages."""
+    languages = storage.get_languages()
+    return {"languages": languages}
+
+
+@app.post("/api/switch-language")
+async def switch_language(user_id: str = "default", language: str = "es"):
+    """Switch user's active language."""
+    user_id = user_id.lower()
+    history = get_history(user_id)
+    old_language = history.language
+
+    # Validate language exists
+    lang_info = get_language_info(language)
+    if not lang_info:
+        return {"success": False, "error": f"Unknown language: {language}"}
+
+    history.switch_language(language)
+    save_history(user_id)
+
+    # Clear pending stories (wrong language)
+    pending_stories.pop(user_id, None)
+
+    # Trigger background story generation for new language
+    trigger_background_story(user_id, history)
+
+    log_event('language.switch', user_id,
+              old_language=old_language,
+              new_language=language)
+
+    return {"success": True, "language": language}
+
+
 @app.get("/api/status", response_model=StatusResponse)
 async def get_status(user_id: str = "default"):
     """Get user status and progress."""
     try:
         history = get_history(user_id)
+        lang_info = get_user_language_info(user_id)
 
         return StatusResponse(
-            language=LANGUAGE,
+            language=lang_info['english_name'],
+            language_code=lang_info['code'],
             difficulty=history.difficulty,
             max_difficulty=MAX_DIFFICULTY,
             total_completed=history.total_completed,
@@ -532,7 +634,8 @@ async def get_status(user_id: str = "default"):
             challenge_stats_display=history.get_challenge_stats_display(),
             practice_time_seconds=int(history.practice_time_seconds),
             practice_time_display=format_practice_time(int(history.practice_time_seconds)),
-            direction=history.direction
+            direction=history.direction,
+            tenses=lang_info.get('tenses', [])
         )
     except HTTPException:
         raise
@@ -553,6 +656,7 @@ async def get_story(user_id: str = "default", force_new: bool = False):
     history = get_history(user_id)
 
     if force_new or history.needs_new_story():
+        lang_info = get_user_language_info(user_id)
         # Try to use pre-generated story first
         pending = get_pending_story(user_id, history.difficulty, history.direction)
         from_cache = pending is not None
@@ -562,9 +666,10 @@ async def get_story(user_id: str = "default", force_new: bool = False):
             # Fall back to synchronous generation with story_provider (pro model)
             loop = asyncio.get_event_loop()
             direction = history.direction
+            li = lang_info
             story, ms = await loop.run_in_executor(
                 None,
-                lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction)
+                lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction, language_info=li)
             )
             story_ai = story_provider.get_last_call_info()
         history.set_story(story, history.difficulty, ms)
@@ -618,6 +723,7 @@ async def get_next_sentence(user_id: str = "default"):
 async def _get_next_sentence_inner(user_id: str = "default"):
     start_time = time.time()
     history = get_history(user_id)
+    lang_code = history.language
 
     # Check if there's an existing unevaluated round (e.g., after page refresh)
     current_round = None
@@ -659,7 +765,7 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                     # Look up each english key to get word/alternatives
                     words = []
                     for eng_key in english_keys:
-                        item = storage.get_vocab_item_by_english(category, eng_key)
+                        item = storage.get_vocab_item_by_english(category, eng_key, language=lang_code)
                         if item:
                             words.append({'word': item['word'], 'translation': item['alternatives'], 'english': item['english']})
                         else:
@@ -681,7 +787,7 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                     from core.vocabulary import get_category_name
                     category = parts[1]
                     english_key = parts[2]
-                    item = storage.get_vocab_item_by_english(category, english_key)
+                    item = storage.get_vocab_item_by_english(category, english_key, language=lang_code)
                     if item:
                         vocab_challenge = {
                             'word': item['word'],
@@ -705,7 +811,7 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 is_verb_challenge = True
                 conjugated_form = last_round.sentence[5:]  # Remove "VERB:" prefix
                 # Get verb info from storage
-                stored = storage.get_verb_conjugation(conjugated_form)
+                stored = storage.get_verb_conjugation(conjugated_form, language=lang_code)
                 if stored:
                     verb_challenge = {
                         'conjugated_form': conjugated_form,
@@ -716,22 +822,25 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 is_review = last_round.generate_ms == 0
 
     # Only get a new sentence/challenge if there's no current unevaluated round
+    lang_code = history.language
+    lang_info = get_user_language_info(user_id)
     if current_round is None:
         # Check if it's verb challenge turn (every 7th turn)
         if history.is_verb_challenge_turn():
             verb_word = history.get_verb_for_challenge()
             if verb_word:
                 # Check storage for existing conjugation, or query AI
-                stored = storage.get_verb_conjugation(verb_word)
+                stored = storage.get_verb_conjugation(verb_word, language=lang_code)
                 if stored:
                     verb_challenge = {'conjugated_form': verb_word, **stored}
                 else:
                     # Query AI for verb conjugation
-                    ai_result = ai_provider.analyze_verb_conjugation(verb_word)
+                    ai_result = ai_provider.analyze_verb_conjugation(verb_word, language_info=lang_info)
                     if ai_result:
                         storage.save_verb_conjugation(
                             verb_word, ai_result['base_verb'], ai_result['tense'],
-                            ai_result['translation'], ai_result['person']
+                            ai_result['translation'], ai_result['person'],
+                            language=lang_code
                         )
                         verb_challenge = {'conjugated_form': verb_word, **ai_result}
 
@@ -792,9 +901,10 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                     # Fall back to synchronous generation with story_provider (pro model)
                     loop = asyncio.get_event_loop()
                     direction = history.direction
+                    li = lang_info
                     story, ms = await loop.run_in_executor(
                         None,
-                        lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction)
+                        lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction, language_info=li)
                     )
                     story_ai = story_provider.get_last_call_info()
                 history.set_story(story, history.difficulty, ms)
@@ -843,7 +953,7 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 eng_keys = parts[1].split(",")
                 spanish_words = []
                 for ek in eng_keys:
-                    item = storage.get_vocab_item_by_english(parts[0], ek)
+                    item = storage.get_vocab_item_by_english(parts[0], ek, language=lang_code)
                     spanish_words.append(item['word'] if item else ek)
                 prev_sentence = ', '.join(spanish_words)
             else:
@@ -857,8 +967,8 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                     # Reverse mode: display the English key
                     prev_sentence = parts[2]
                 else:
-                    # Normal mode: look up Spanish word from english key for display
-                    item = storage.get_vocab_item_by_english(parts[1], parts[2])
+                    # Normal mode: look up target language word from english key for display
+                    item = storage.get_vocab_item_by_english(parts[1], parts[2], language=lang_code)
                     prev_sentence = item['word'] if item else parts[2]
             else:
                 prev_sentence = prev_sentence
@@ -960,6 +1070,10 @@ async def submit_translation(request: TranslationRequest):
 
     try:
         history = get_history(request.user_id)
+        lang_code = history.language
+        lang_info = get_user_language_info(request.user_id)
+        accent_set = get_accent_words_set(lang_info)
+        script = lang_info.get('script', 'latin')
 
         # Find the current round (last in rounds list)
         if not history.rounds:
@@ -994,14 +1108,14 @@ async def submit_translation(request: TranslationRequest):
             logger.info(f"Verb challenge for: {conjugated_form}")
 
             # Get verb info from storage (should already be there from get_next_sentence)
-            stored = storage.get_verb_conjugation(conjugated_form)
+            stored = storage.get_verb_conjugation(conjugated_form, language=lang_code)
             if not stored:
                 # Fallback: query AI
-                ai_result = ai_provider.analyze_verb_conjugation(conjugated_form)
+                ai_result = ai_provider.analyze_verb_conjugation(conjugated_form, language_info=lang_info)
                 if ai_result:
                     storage.save_verb_conjugation(
                         conjugated_form, ai_result['base_verb'], ai_result['tense'],
-                        ai_result['translation'], ai_result['person']
+                        ai_result['translation'], ai_result['person'], language=lang_code
                     )
                     stored = ai_result
 
@@ -1015,18 +1129,23 @@ async def submit_translation(request: TranslationRequest):
             student_answer = request.translation.strip()
 
             if history.direction == 'reverse':
-                # Reverse mode (EN→ES): user sees English, types Spanish conjugated form
+                # Script validation for reverse mode
+                if script != 'latin' and not validate_script(student_answer, script):
+                    script_name = 'Cyrillic' if script == 'cyrillic' else script
+                    raise HTTPException(status_code=400, detail=f"Please write your answer in {script_name} script.")
+                # Reverse mode (EN→target): user sees English, types target language conjugated form
                 correct_display = conjugated_form
                 sa_lower = student_answer.lower()
                 cf_lower = conjugated_form.lower()
                 translation_correct = sa_lower == cf_lower
                 if not translation_correct:
-                    translation_correct = accent_lenient_match(student_answer, conjugated_form, target_is_spanish=True)
+                    translation_correct = accent_lenient_match(student_answer, conjugated_form, target_is_spanish=True, accent_words=accent_set)
             else:
                 # Forward mode (ES→EN): user sees Spanish, types English translation
                 correct_display = english_translation
                 verb_check = ai_provider.validate_verb_translation(
-                    conjugated_form, base_verb, english_translation, student_answer
+                    conjugated_form, base_verb, english_translation, student_answer,
+                    language_info=lang_info
                 )
                 translation_correct = verb_check.get('correct', False)
 
@@ -1080,7 +1199,7 @@ async def submit_translation(request: TranslationRequest):
             # Look up each english key to get word/alternatives
             vocab_items = []
             for eng_key in english_keys:
-                item = storage.get_vocab_item_by_english(category, eng_key)
+                item = storage.get_vocab_item_by_english(category, eng_key, language=lang_code)
                 if item:
                     vocab_items.append(item)
                 else:
@@ -1100,7 +1219,7 @@ async def submit_translation(request: TranslationRequest):
                     # Reverse: English shown, user types Spanish word
                     is_correct = student_answer.lower() == spanish_word.lower()
                     if not is_correct:
-                        is_correct = accent_lenient_match(student_answer, spanish_word, target_is_spanish=True)
+                        is_correct = accent_lenient_match(student_answer, spanish_word, target_is_spanish=True, accent_words=accent_set)
                     word_results.append({
                         'word': alternatives,  # English shown
                         'correct_answer': spanish_word,  # Spanish expected
@@ -1112,7 +1231,7 @@ async def submit_translation(request: TranslationRequest):
                     correct_answers = [t.strip().lower() for t in alternatives.split(',')]
                     is_correct = student_answer.lower() in correct_answers
                     if not is_correct:
-                        is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=False) for a in correct_answers)
+                        is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=False, accent_words=accent_set) for a in correct_answers)
                     word_results.append({
                         'word': spanish_word,  # Spanish shown
                         'correct_answer': alternatives,
@@ -1187,7 +1306,7 @@ async def submit_translation(request: TranslationRequest):
             is_correct = student_answer in correct_answers
             if not is_correct:
                 target_is_spanish = is_reverse
-                is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=target_is_spanish) for a in correct_answers)
+                is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=target_is_spanish, accent_words=accent_set) for a in correct_answers)
 
             score = 100 if is_correct else 0
             judgement = {
@@ -1222,7 +1341,7 @@ async def submit_translation(request: TranslationRequest):
             else:
                 # Normal mode (ES→EN): word is Spanish, correct answer is English
                 # First check persistent storage for translation
-                stored_translation = storage.get_word_translation(word)
+                stored_translation = storage.get_word_translation(word, language=lang_code)
 
                 if stored_translation:
                     logger.info(f"Using stored translation: {stored_translation}")
@@ -1231,12 +1350,12 @@ async def submit_translation(request: TranslationRequest):
                 else:
                     # Query AI for translation and store it
                     logger.info(f"Querying AI for translation of: {word}")
-                    ai_result = ai_provider.get_word_translation(word)
+                    ai_result = ai_provider.get_word_translation(word, language_info=lang_info)
                     if ai_result:
                         correct_translation = ai_result['translation']
                         word_type = ai_result['type']
                         # Save to persistent storage
-                        storage.save_word_translation(word, correct_translation, word_type)
+                        storage.save_word_translation(word, correct_translation, word_type, language=lang_code)
                         logger.info(f"Saved translation: {correct_translation} ({word_type})")
                     else:
                         # Fallback to user's word history if AI fails
@@ -1274,7 +1393,7 @@ async def submit_translation(request: TranslationRequest):
                 is_correct = normalized_student in normalized_correct or student_answer in normalized_correct
             if not is_correct:
                 # Try accent-lenient matching
-                is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=target_is_spanish) for a in correct_answers)
+                is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=target_is_spanish, accent_words=accent_set) for a in correct_answers)
 
             score = 100 if is_correct else 0
             judgement = {
@@ -1293,11 +1412,21 @@ async def submit_translation(request: TranslationRequest):
             if current_round.sentence != request.sentence:
                 raise HTTPException(status_code=400, detail="Sentence mismatch")
 
+            # Script validation for reverse mode (student types target language)
+            if history.direction == 'reverse' and script != 'latin':
+                if not validate_script(request.translation, script):
+                    script_name = 'Cyrillic' if script == 'cyrillic' else script
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Please write your answer in {script_name} script."
+                    )
+
             judgement, judge_ms = ai_provider.validate_translation(
                 request.sentence,
                 request.translation,
                 story_context=history.current_story,
-                direction=history.direction
+                direction=history.direction,
+                language_info=lang_info
             )
 
         current_round.translation = request.translation
@@ -1439,7 +1568,8 @@ async def _get_hint_inner(request: HintRequest):
     start_time = time.time()
     history = get_history(request.user_id)
 
-    hint = ai_provider.get_hint(request.sentence, history.correct_words, direction=history.direction, partial_translation=request.partial_translation)
+    lang_info = get_user_language_info(request.user_id)
+    hint = ai_provider.get_hint(request.sentence, history.correct_words, direction=history.direction, partial_translation=request.partial_translation, language_info=lang_info)
 
     # Sanitize hint entries: discard arrays with null/None/"null" values
     def valid_entry(entry):

@@ -990,6 +990,59 @@ header h1 {
     min-width: 200px;
 }
 
+/* Language Select (start screen) */
+.language-select {
+    padding: 12px;
+    font-size: 1rem;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
+    cursor: pointer;
+}
+
+.language-select:focus {
+    outline: none;
+    border-color: #e94560;
+}
+
+.language-select option {
+    background: #1a1a2e;
+    color: #fff;
+}
+
+/* Language switch modal */
+.language-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.language-option-btn {
+    padding: 15px 20px;
+    font-size: 1rem;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    color: #e0e0e0;
+    cursor: pointer;
+    transition: background 0.3s, border-color 0.3s;
+    text-align: left;
+}
+
+.language-option-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.language-option-btn.active {
+    border-color: #e94560;
+    background: rgba(233, 69, 96, 0.15);
+    color: #e94560;
+    font-weight: 500;
+}
+
 /* Utility Classes */
 .hidden {
     display: none !important;

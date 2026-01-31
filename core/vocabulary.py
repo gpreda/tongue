@@ -193,12 +193,10 @@ CATEGORY_DISPLAY_NAMES = {cat: data['name'] for cat, data in VOCABULARY_CHALLENG
 
 MULTI_WORD_CATEGORIES = {'day', 'month', 'season', 'number'}
 
-# Numbers in the 10-30 range for multi-word challenges
-MULTI_WORD_NUMBER_RANGE = {
-    'diez', 'once', 'doce', 'trece', 'catorce', 'quince',
-    'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte',
-    'veintiuno', 'veintidós', 'veintitrés', 'veinticuatro', 'veinticinco',
-    'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve', 'treinta'
+# English numbers in the 10-30 range for multi-word challenges (language-agnostic)
+MULTI_WORD_NUMBER_ENGLISH = {
+    '10', '11', '12', '13', '14', '15', '16', '17', '18', '19',
+    '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30'
 }
 
 # Module-level storage for DB-backed vocabulary
@@ -210,14 +208,28 @@ def _english_key(alternatives: str) -> str:
     return alternatives.split(',')[0].strip()
 
 
+def _get_vocab_dict(language: str) -> dict:
+    """Get the vocabulary challenges dict for a given language."""
+    if language == 'es':
+        return VOCABULARY_CHALLENGES
+    if language == 'sr-latn':
+        from scripts.seed_serbian import get_seed_data_sr_latn
+        return get_seed_data_sr_latn()
+    if language == 'sr-cyrl':
+        from scripts.seed_serbian import get_seed_data_sr_cyrl
+        return get_seed_data_sr_cyrl()
+    return {}
+
+
 def get_seed_data(language: str = 'es') -> list[dict]:
-    """Generate seed data from static VOCABULARY_CHALLENGES dict.
+    """Generate seed data from vocabulary dict for a given language.
 
     Returns list of {category, english, word, language, alternatives} dicts.
     English key = first comma-separated value from the alternatives string.
     """
+    vocab = _get_vocab_dict(language)
     items = []
-    for category, data in VOCABULARY_CHALLENGES.items():
+    for category, data in vocab.items():
         for word, alternatives in data['items'].items():
             english = _english_key(alternatives)
             items.append({
@@ -245,7 +257,8 @@ def get_all_categories(language: str = 'es') -> list[str]:
                 return cats
         except Exception:
             pass
-    return list(VOCABULARY_CHALLENGES.keys())
+    vocab = _get_vocab_dict(language)
+    return list(vocab.keys()) if vocab else list(VOCABULARY_CHALLENGES.keys())
 
 
 def get_category_name(category: str) -> str:
@@ -256,7 +269,7 @@ def get_category_name(category: str) -> str:
 def get_category_items(category: str, language: str = 'es') -> dict:
     """Get items for a category.
 
-    Returns {spanish_word: english_alternatives} dict for backward compatibility.
+    Returns {target_word: english_alternatives} dict.
     When storage is set, queries DB; otherwise falls back to static dict.
     """
     if _storage:
@@ -266,7 +279,8 @@ def get_category_items(category: str, language: str = 'es') -> dict:
                 return {item['word']: item['alternatives'] for item in db_items}
         except Exception:
             pass
-    return VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+    vocab = _get_vocab_dict(language)
+    return vocab.get(category, {}).get('items', {})
 
 
 def get_category_items_with_english(category: str, language: str = 'es') -> list[dict]:
@@ -282,19 +296,20 @@ def get_category_items_with_english(category: str, language: str = 'es') -> list
         except Exception:
             pass
     # Fallback to static dict
-    data = VOCABULARY_CHALLENGES.get(category, {}).get('items', {})
+    vocab = _get_vocab_dict(language)
+    data = vocab.get(category, {}).get('items', {})
     return [
         {'english': _english_key(alt), 'word': word, 'alternatives': alt}
         for word, alt in data.items()
     ]
 
 
-def get_random_challenge(category: str, reverse: bool = False) -> dict | None:
+def get_random_challenge(category: str, reverse: bool = False, language: str = 'es') -> dict | None:
     """Get a random word from a category.
 
     Returns dict with: word, translation, english, category, category_name, is_reverse
     """
-    items_list = get_category_items_with_english(category)
+    items_list = get_category_items_with_english(category, language)
     if not items_list:
         return None
 
@@ -309,25 +324,25 @@ def get_random_challenge(category: str, reverse: bool = False) -> dict | None:
     }
 
 
-def get_multi_word_number_items() -> list[dict]:
+def get_multi_word_number_items(language: str = 'es') -> list[dict]:
     """Get number items filtered to 10-30 range for multi-word challenges.
 
     Returns list of {english, word, alternatives} dicts.
     """
-    items = get_category_items_with_english('number')
-    return [item for item in items if item['word'] in MULTI_WORD_NUMBER_RANGE]
+    items = get_category_items_with_english('number', language)
+    return [item for item in items if item['english'] in MULTI_WORD_NUMBER_ENGLISH]
 
 
-def get_multi_word_challenge(category: str, reverse: bool = False) -> dict | None:
+def get_multi_word_challenge(category: str, reverse: bool = False, language: str = 'es') -> dict | None:
     """Get a multi-word challenge with 4 random words from a category.
 
     Returns dict with: words (list of {word, translation, english}), category, category_name,
                        is_multi (True), is_reverse (bool)
     """
     if category == 'number':
-        items_list = get_multi_word_number_items()
+        items_list = get_multi_word_number_items(language)
     else:
-        items_list = get_category_items_with_english(category)
+        items_list = get_category_items_with_english(category, language)
 
     if not items_list or len(items_list) < 4:
         return None
