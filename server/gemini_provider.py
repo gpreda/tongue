@@ -266,6 +266,9 @@ class GeminiProvider(AIProvider):
                  the subject is implied or unnecessary (e.g., "It is winter" → "Zima je" is correct,
                  "I eat" → "Como" is correct — do NOT require an explicit pronoun)
                - Different but valid word order (e.g., "Zima je" vs "Je zima" — both valid)
+               - Providing multiple valid translations separated by commas or slashes
+                 (e.g., "fresh, cool" for "fresca" — if all variants are correct translations,
+                 score should be 100)
             5. Only proper nouns (names of people, places, brands) may remain in original form.
                Common nouns MUST be translated.
             6. If the translation is semantically correct with all words properly translated, the score should be 100.
