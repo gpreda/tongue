@@ -342,6 +342,18 @@ class FileStorage(Storage):
         }
     ]
 
+    _synonym_cache: dict = {}
+
+    def get_synonym_antonym(self, word: str, language: str = 'es') -> dict | None:
+        """Get cached synonym/antonym for a word (in-memory only for file storage)."""
+        key = f"{word}:{language}"
+        return self._synonym_cache.get(key)
+
+    def save_synonym_antonym(self, word: str, language: str, synonym: str | None, antonym: str | None) -> None:
+        """Save synonym/antonym pair for a word (in-memory only for file storage)."""
+        key = f"{word}:{language}"
+        self._synonym_cache[key] = {'synonym': synonym, 'antonym': antonym}
+
     def get_languages(self) -> list[dict]:
         """Get all active languages."""
         return self._LANGUAGES

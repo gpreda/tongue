@@ -78,6 +78,16 @@ class Storage(ABC):
         pass
 
     @abstractmethod
+    def get_verb_conjugation_rules(self, language: str, tense: str) -> str | None:
+        """Get cached conjugation rules for a language+tense. Returns rules text or None."""
+        pass
+
+    @abstractmethod
+    def save_verb_conjugation_rules(self, language: str, tense: str, rules: str) -> None:
+        """Save conjugation rules for a language+tense."""
+        pass
+
+    @abstractmethod
     def load_api_stats(self, provider_name: str) -> dict | None:
         """Load API usage stats for a provider. Returns stats dict or None."""
         pass
@@ -108,6 +118,17 @@ class Storage(ABC):
     def get_vocab_item_by_english(self, category: str, english: str, language: str = 'es') -> dict | None:
         """Look up a single vocabulary item by category and english key.
         Returns {english, word, alternatives} or None."""
+        pass
+
+    @abstractmethod
+    def get_synonym_antonym(self, word: str, language: str = 'es') -> dict | None:
+        """Get cached synonym/antonym for a word.
+        Returns {synonym, antonym} or None if not cached."""
+        pass
+
+    @abstractmethod
+    def save_synonym_antonym(self, word: str, language: str, synonym: str | None, antonym: str | None) -> None:
+        """Save synonym/antonym pair for a word."""
         pass
 
     @abstractmethod

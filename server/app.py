@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import random
 import time
 import traceback
 import unicodedata
@@ -190,6 +191,17 @@ class HintResponse(BaseModel):
     adjective: Optional[list]
 
 
+class VerbHintRequest(BaseModel):
+    sentence: str
+    user_id: str = "default"
+
+
+class VerbHintResponse(BaseModel):
+    rules: str
+    tense: str
+    base_verb: str
+
+
 class StatusResponse(BaseModel):
     language: str
     language_code: str = 'es'
@@ -226,6 +238,8 @@ class NextSentenceResponse(BaseModel):
     vocab_challenge: Optional[dict] = None  # {word, translation, category, category_name}
     is_verb_challenge: bool = False
     verb_challenge: Optional[dict] = None  # {conjugated_form, base_verb, tense, translation, person}
+    is_synonym_challenge: bool = False
+    synonym_challenge: Optional[dict] = None  # {word, challenge_type (SYN/ANT), type}
     has_previous_evaluation: bool
     previous_evaluation: Optional[dict]
     direction: str = 'normal'
@@ -735,9 +749,11 @@ async def _get_next_sentence_inner(user_id: str = "default"):
     is_word_challenge = False
     is_vocab_challenge = False
     is_verb_challenge = False
+    is_synonym_challenge = False
     challenge_word = None
     vocab_challenge = None
     verb_challenge = None
+    synonym_challenge = None
 
     if history.rounds:
         last_round = history.rounds[-1]
@@ -821,6 +837,17 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                         'conjugated_form': conjugated_form,
                         **stored
                     }
+            # Check if this was a synonym/antonym challenge
+            elif last_round.sentence.startswith("SYN:") or last_round.sentence.startswith("ANT:"):
+                is_synonym_challenge = True
+                challenge_type = "SYN" if last_round.sentence.startswith("SYN:") else "ANT"
+                syn_word = last_round.sentence[4:]  # Remove "SYN:" or "ANT:" prefix
+                word_info = history.words.get(syn_word, {})
+                synonym_challenge = {
+                    'word': syn_word,
+                    'challenge_type': challenge_type,
+                    'type': word_info.get('type', 'unknown')
+                }
             else:
                 # Not a challenge - check if it's a review sentence (generate_ms=0)
                 is_review = last_round.generate_ms == 0
@@ -855,7 +882,50 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                     history.rounds.append(current_round)
                     save_history(user_id)
 
-        # Check if it's vocab challenge turn (every 5th turn, offset by 2)
+        # Check if it's synonym/antonym challenge turn (every 11th turn)
+        if current_round is None and history.is_synonym_challenge_turn():
+            syn_word_info = history.get_word_for_synonym_challenge()
+            if syn_word_info:
+                syn_word = syn_word_info['word']
+                # Check cache first
+                cached = storage.get_synonym_antonym(syn_word, language=lang_code)
+                if not cached:
+                    # Generate via AI and cache
+                    ai_result = ai_provider.generate_synonym_antonym(syn_word, language_info=lang_info)
+                    if ai_result:
+                        storage.save_synonym_antonym(
+                            syn_word, lang_code,
+                            ai_result.get('synonym'), ai_result.get('antonym')
+                        )
+                        cached = ai_result
+
+                if cached:
+                    # Randomly pick SYN or ANT
+                    has_synonym = cached.get('synonym') is not None
+                    has_antonym = cached.get('antonym') is not None
+
+                    if has_synonym and has_antonym:
+                        challenge_type = random.choice(['SYN', 'ANT'])
+                    elif has_synonym:
+                        challenge_type = 'SYN'
+                    elif has_antonym:
+                        challenge_type = 'ANT'
+                    else:
+                        challenge_type = None
+
+                    if challenge_type:
+                        is_synonym_challenge = True
+                        synonym_challenge = {
+                            'word': syn_word,
+                            'challenge_type': challenge_type,
+                            'type': syn_word_info['type']
+                        }
+                        from core.models import TongueRound
+                        current_round = TongueRound(f"{challenge_type}:{syn_word}", history.difficulty, 0)
+                        history.rounds.append(current_round)
+                        save_history(user_id)
+
+        # Check if it's vocab challenge turn (every 4th turn, offset by 2)
         if current_round is None and history.is_vocab_challenge_turn():
             vocab_challenge = history.get_vocab_challenge()
             if vocab_challenge:
@@ -979,12 +1049,18 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         elif prev_sentence.startswith("VERB:"):
             prev_challenge_type = 'verb'
             prev_sentence = prev_sentence[5:]  # Remove VERB: prefix
+        elif prev_sentence.startswith("SYN:") or prev_sentence.startswith("ANT:"):
+            prev_challenge_type = 'synonym'
+            prev_sentence = prev_sentence[4:]  # Remove SYN: or ANT: prefix
 
         # Determine challenge direction for display
         prev_challenge_direction = None
         if prev_challenge_type:
             lang_upper = lang_code.upper()
-            if prev_challenge_type == 'vocab':
+            if prev_challenge_type == 'synonym':
+                # Synonym challenges are always in the target language
+                prev_challenge_direction = f"{lang_upper}"
+            elif prev_challenge_type == 'vocab':
                 # Vocab challenges have per-challenge direction via prefix
                 is_rev = prev.sentence.startswith("VOCABR:") or prev.sentence.startswith("VOCAB4R:")
                 prev_challenge_direction = f"EN → {lang_upper}" if is_rev else f"{lang_upper} → EN"
@@ -1033,6 +1109,8 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         # Reverse mode: show English translation, user types Spanish conjugated form
         if history.direction == 'reverse' and verb_challenge:
             sentence = verb_challenge.get('translation', sentence)
+    elif is_synonym_challenge and (sentence.startswith("SYN:") or sentence.startswith("ANT:")):
+        sentence = sentence[4:]  # Remove SYN: or ANT: prefix for display
 
     # Record when this sentence/challenge was served for practice time tracking
     record_served_time(user_id)
@@ -1049,6 +1127,12 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                   challenge_type='vocab',
                   word=sentence,
                   category=vocab_challenge.get('category') if vocab_challenge else None,
+                  ms=ms)
+    elif is_synonym_challenge:
+        log_event('challenge.served', user_id,
+                  challenge_type='synonym',
+                  word=sentence,
+                  syn_type=synonym_challenge.get('challenge_type') if synonym_challenge else None,
                   ms=ms)
     elif is_verb_challenge:
         log_event('challenge.served', user_id,
@@ -1076,6 +1160,8 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         vocab_challenge=vocab_challenge,
         is_verb_challenge=is_verb_challenge,
         verb_challenge=verb_challenge,
+        is_synonym_challenge=is_synonym_challenge,
+        synonym_challenge=synonym_challenge,
         has_previous_evaluation=has_previous,
         previous_evaluation=previous_eval,
         direction=history.direction
@@ -1112,20 +1198,62 @@ async def submit_translation(request: TranslationRequest):
                           current_round.sentence.startswith("VOCAB4R:"))
         is_vocab_challenge = current_round.sentence.startswith("VOCAB:") or current_round.sentence.startswith("VOCABR:") or is_multi_vocab
         is_verb_challenge = current_round.sentence.startswith("VERB:")
+        is_synonym_challenge = (current_round.sentence.startswith("SYN:") or
+                                current_round.sentence.startswith("ANT:"))
 
         # Calculate and record practice time
         practice_delta = get_practice_delta(request.user_id)
         if practice_delta is not None:
             practice_recorded = history.record_practice_time(practice_delta)
             # Log practice time event
-            challenge_type_str = 'verb' if is_verb_challenge else ('vocab' if is_vocab_challenge else ('word' if is_word_challenge else 'sentence'))
+            challenge_type_str = 'verb' if is_verb_challenge else ('synonym' if is_synonym_challenge else ('vocab' if is_vocab_challenge else ('word' if is_word_challenge else 'sentence')))
             log_event('practice_time.delta', request.user_id,
                       delta_seconds=round(practice_delta, 2),
                       task_type=challenge_type_str,
                       recorded=practice_recorded,
                       ms=int(practice_delta * 1000))
 
-        if is_verb_challenge:
+        if is_synonym_challenge:
+            # Synonym/Antonym challenge
+            challenge_type = "SYN" if current_round.sentence.startswith("SYN:") else "ANT"
+            syn_word = current_round.sentence[4:]  # Remove SYN: or ANT: prefix
+            logger.info(f"Synonym challenge for: {syn_word} (type={challenge_type})")
+
+            # Get cached synonym/antonym
+            cached = storage.get_synonym_antonym(syn_word, language=lang_code)
+            if not cached:
+                raise HTTPException(status_code=500, detail="Synonym/antonym data not found")
+
+            expected = cached.get('synonym') if challenge_type == 'SYN' else cached.get('antonym')
+            if not expected:
+                raise HTTPException(status_code=500, detail=f"No {challenge_type.lower()} available for this word")
+
+            student_answer = request.translation.strip()
+            type_label = 'Synonym' if challenge_type == 'SYN' else 'Antonym'
+
+            # Check if answer matches cached value (case-insensitive, accent-lenient)
+            is_correct = student_answer.lower() == expected.lower()
+            if not is_correct:
+                is_correct = accent_lenient_match(student_answer, expected, target_is_spanish=True, accent_words=accent_set)
+
+            # If doesn't match cached, ask AI to validate (user might provide a different valid answer)
+            if not is_correct and student_answer:
+                ai_check = ai_provider.validate_synonym_antonym(
+                    syn_word, challenge_type, expected, student_answer,
+                    language_info=lang_info
+                )
+                is_correct = ai_check.get('correct', False)
+
+            score = 100 if is_correct else 0
+            judgement = {
+                'score': score,
+                'correct_translation': expected,
+                'evaluation': f'Correct!' if is_correct else f'The {type_label.lower()} of "{syn_word}" is: {expected}',
+                'vocabulary_breakdown': [[syn_word, expected, type_label.lower(), is_correct]]
+            }
+            judge_ms = 0
+
+        elif is_verb_challenge:
             # Verb challenge: check both translation AND tense
             conjugated_form = current_round.sentence[5:]  # Remove "VERB:" prefix
             logger.info(f"Verb challenge for: {conjugated_form}")
@@ -1453,14 +1581,14 @@ async def submit_translation(request: TranslationRequest):
         current_round.translation = request.translation
 
         # Challenges have separate scoring, don't affect level progress
-        if is_verb_challenge or is_vocab_challenge or is_word_challenge:
+        if is_verb_challenge or is_vocab_challenge or is_word_challenge or is_synonym_challenge:
             current_round.judgement = judgement
             current_round.judge_ms = judge_ms
             current_round.evaluated = True
             history.total_completed += 1
 
             # Record challenge stats
-            challenge_type = 'verb' if is_verb_challenge else ('vocab' if is_vocab_challenge else 'word')
+            challenge_type = 'verb' if is_verb_challenge else ('synonym' if is_synonym_challenge else ('vocab' if is_vocab_challenge else 'word'))
             if is_verb_challenge:
                 # For verb challenges, count translation correctness for the word stat
                 is_fully_correct = judgement.get('translation_correct', False)
@@ -1628,6 +1756,73 @@ async def _get_hint_inner(request: HintRequest):
         verb=hint.get('verb'),
         adjective=hint.get('adjective')
     )
+
+
+@app.post("/api/verb-hint", response_model=VerbHintResponse)
+async def get_verb_hint(request: VerbHintRequest):
+    """Get conjugation rules hint for a verb challenge."""
+    try:
+        return await _get_verb_hint_inner(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_verb_hint: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        log_event('error.server', request.user_id,
+                  endpoint='/api/verb-hint',
+                  error_type=type(e).__name__,
+                  error_message=str(e),
+                  traceback=traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+async def _get_verb_hint_inner(request: VerbHintRequest):
+    start_time = time.time()
+    history = get_history(request.user_id)
+    lang_code = history.language
+    lang_info = get_user_language_info(request.user_id)
+
+    # Extract conjugated form from "VERB:conjugated_form"
+    sentence = request.sentence
+    if sentence.startswith("VERB:"):
+        conjugated_form = sentence[5:]
+    else:
+        conjugated_form = sentence
+
+    # Look up the verb info to get the tense
+    stored = storage.get_verb_conjugation(conjugated_form, language=lang_code)
+    if not stored:
+        raise HTTPException(status_code=404, detail="Verb conjugation not found")
+
+    tense = stored['tense']
+    base_verb = stored.get('base_verb', conjugated_form)
+
+    # Check DB cache for conjugation rules
+    rules = storage.get_verb_conjugation_rules(lang_code, tense)
+
+    if not rules:
+        # Generate via Gemini and cache
+        rules = ai_provider.generate_conjugation_rules(tense, language_info=lang_info)
+        if rules:
+            storage.save_verb_conjugation_rules(lang_code, tense, rules)
+
+    if not rules:
+        raise HTTPException(status_code=500, detail="Could not generate conjugation rules")
+
+    ms = int((time.time() - start_time) * 1000)
+    hint_ai = ai_provider.get_last_call_info()
+    log_event('verb_hint.request', request.user_id,
+              conjugated_form=conjugated_form,
+              tense=tense,
+              base_verb=base_verb,
+              cached=storage.get_verb_conjugation_rules(lang_code, tense) is not None,
+              ms=ms,
+              ai_used=bool(hint_ai.get('model_name')),
+              model_name=hint_ai.get('model_name'),
+              model_tokens=hint_ai.get('model_tokens'),
+              model_ms=hint_ai.get('model_ms'))
+
+    return VerbHintResponse(rules=rules, tense=tense, base_verb=base_verb)
 
 
 @app.post("/api/downgrade")

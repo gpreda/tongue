@@ -155,6 +155,16 @@ class PostgresStorage(Storage):
                     END IF;
                 END $$;
             """)
+            # Verb conjugation rules table (cached per language+tense)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS verb_conjugation_rules (
+                    language VARCHAR(10) NOT NULL,
+                    tense VARCHAR(50) NOT NULL,
+                    rules TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (language, tense)
+                )
+            """)
             # Events log table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS events (
@@ -259,6 +269,17 @@ class PostgresStorage(Storage):
                     language     VARCHAR(10)  NOT NULL DEFAULT 'es',
                     alternatives VARCHAR(500),
                     PRIMARY KEY (category, english, language)
+                )
+            """)
+            # Synonym/antonym cache table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS synonym_antonym_cache (
+                    word VARCHAR(255) NOT NULL,
+                    language VARCHAR(10) NOT NULL,
+                    synonym VARCHAR(255),
+                    antonym VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (word, language)
                 )
             """)
             cur.execute("""
@@ -495,6 +516,35 @@ class PostgresStorage(Storage):
             self.conn.commit()
         except Exception as e:
             print(f"Error saving verb conjugation: {e}")
+            self.conn.rollback()
+            raise
+
+    def get_verb_conjugation_rules(self, language: str, tense: str) -> str | None:
+        """Get cached conjugation rules for a language+tense."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT rules FROM verb_conjugation_rules WHERE language = %s AND tense = %s",
+                    (language, tense)
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            print(f"Error getting verb conjugation rules: {e}")
+            return None
+
+    def save_verb_conjugation_rules(self, language: str, tense: str, rules: str) -> None:
+        """Save conjugation rules for a language+tense."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO verb_conjugation_rules (language, tense, rules)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (language, tense) DO UPDATE SET rules = EXCLUDED.rules
+                """, (language, tense, rules))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Error saving verb conjugation rules: {e}")
             self.conn.rollback()
             raise
 
@@ -787,17 +837,13 @@ class PostgresStorage(Storage):
     # Vocabulary storage methods
 
     def seed_vocabulary(self, items: list[dict]) -> None:
-        """Seed vocabulary items into the database if not already seeded for this language."""
+        """Seed vocabulary items into the database, inserting any missing items."""
         if not items:
             return
         language = items[0].get('language', 'es')
         try:
+            inserted = 0
             with self.conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM vocabulary_items WHERE language = %s", (language,))
-                count = cur.fetchone()[0]
-                if count > 0:
-                    return  # Already seeded for this language
-
                 for item in items:
                     cur.execute("""
                         INSERT INTO vocabulary_items (category, english, word, language, alternatives)
@@ -805,8 +851,10 @@ class PostgresStorage(Storage):
                         ON CONFLICT (category, english, language) DO NOTHING
                     """, (item['category'], item['english'], item['word'],
                           item['language'], item['alternatives']))
+                    inserted += cur.rowcount
             self.conn.commit()
-            print(f"Seeded {len(items)} vocabulary items for language '{language}'")
+            if inserted > 0:
+                print(f"Seeded {inserted} new vocabulary items for language '{language}'")
         except Exception as e:
             print(f"Error seeding vocabulary: {e}")
             self.conn.rollback()
@@ -854,6 +902,38 @@ class PostgresStorage(Storage):
         except Exception as e:
             print(f"Error getting vocab item by english: {e}")
             return None
+
+    def get_synonym_antonym(self, word: str, language: str = 'es') -> dict | None:
+        """Get cached synonym/antonym for a word."""
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT synonym, antonym FROM synonym_antonym_cache WHERE word = %s AND language = %s",
+                    (word, language)
+                )
+                row = cur.fetchone()
+                if row:
+                    return {'synonym': row['synonym'], 'antonym': row['antonym']}
+                return None
+        except Exception as e:
+            print(f"Error getting synonym/antonym: {e}")
+            return None
+
+    def save_synonym_antonym(self, word: str, language: str, synonym: str | None, antonym: str | None) -> None:
+        """Save synonym/antonym pair for a word."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO synonym_antonym_cache (word, language, synonym, antonym)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (word, language) DO UPDATE SET
+                        synonym = EXCLUDED.synonym,
+                        antonym = EXCLUDED.antonym
+                """, (word, language, synonym, antonym))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Error saving synonym/antonym: {e}")
+            self.conn.rollback()
 
     def get_languages(self) -> list[dict]:
         """Get all active languages."""

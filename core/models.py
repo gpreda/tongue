@@ -76,7 +76,8 @@ class History:
         self.challenge_stats = {
             'word': {'correct': 0, 'incorrect': 0},
             'vocab': {'correct': 0, 'incorrect': 0},
-            'verb': {'correct': 0, 'incorrect': 0}
+            'verb': {'correct': 0, 'incorrect': 0},
+            'synonym': {'correct': 0, 'incorrect': 0}
         }
         # Practice time tracking per language+direction key, e.g. {"es:normal": 120.5}
         self.practice_times = {}
@@ -261,7 +262,8 @@ class History:
         history.challenge_stats = data.get('challenge_stats', {
             'word': {'correct': 0, 'incorrect': 0},
             'vocab': {'correct': 0, 'incorrect': 0},
-            'verb': {'correct': 0, 'incorrect': 0}
+            'verb': {'correct': 0, 'incorrect': 0},
+            'synonym': {'correct': 0, 'incorrect': 0}
         })
         last_eval = data.get('last_evaluated_round')
         history.last_evaluated_round = TongueRound.from_dict(last_eval) if last_eval else None
@@ -437,7 +439,8 @@ class History:
                 # Skip challenge items that shouldn't be in review queue
                 if (sentence.startswith('WORD:') or sentence.startswith('VOCAB:') or
                         sentence.startswith('VOCAB4:') or sentence.startswith('VOCAB4R:') or
-                        sentence.startswith('VERB:')):
+                        sentence.startswith('VERB:') or sentence.startswith('SYN:') or
+                        sentence.startswith('ANT:')):
                     self.review_queue.pop(i)
                     continue
                 # Remove from queue and return this sentence
@@ -537,7 +540,9 @@ class History:
                         round.sentence.startswith('VOCAB:') or
                         round.sentence.startswith('VOCAB4:') or
                         round.sentence.startswith('VOCAB4R:') or
-                        round.sentence.startswith('VERB:'))
+                        round.sentence.startswith('VERB:') or
+                        round.sentence.startswith('SYN:') or
+                        round.sentence.startswith('ANT:'))
         if score <= 50 and not is_challenge:
             # Check if sentence is not already in review queue
             existing = [r['sentence'] for r in self.review_queue]
@@ -675,10 +680,10 @@ class History:
 
     def is_vocab_challenge_turn(self) -> bool:
         """Check if this turn should be a vocabulary category challenge."""
-        # Every 5th turn (offset from word challenges)
-        if self.total_completed < 5:
+        # Every 4th turn (offset from word challenges)
+        if self.total_completed < 4:
             return False
-        return self.total_completed % 5 == 2  # Offset so it doesn't overlap with word challenges
+        return self.total_completed % 4 == 2  # Offset so it doesn't overlap with word challenges
 
     def get_vocab_challenge(self) -> dict | None:
         """Get a vocabulary challenge from a random category.
@@ -718,6 +723,36 @@ class History:
         if self.total_completed < 7:
             return False
         return self.total_completed % 7 == 0
+
+    def is_synonym_challenge_turn(self) -> bool:
+        """Check if this turn should be a synonym/antonym challenge."""
+        # Every 11th turn (offset from verb's % 7)
+        if self.total_completed < 11:
+            return False
+        if len(self.words) < 5:
+            return False
+        return self.total_completed % 11 == 0
+
+    def get_word_for_synonym_challenge(self) -> dict | None:
+        """Get a word from user's learned words for synonym/antonym challenge.
+        Only picks nouns, verbs, adjectives (skips proper nouns).
+        Returns dict with word, type, translation or None."""
+        candidates = []
+        for word, info in self.words.items():
+            if self._is_proper_noun(word):
+                continue
+            word_type = (info.get('type') or '').lower()
+            if word_type not in ('noun', 'verb', 'adjective'):
+                continue
+            candidates.append({
+                'word': word,
+                'type': word_type,
+                'translation': info.get('translation', '')
+            })
+
+        if not candidates:
+            return None
+        return random.choice(candidates)
 
     def get_verb_for_challenge(self) -> str | None:
         """Get a verb from user's word history for verb challenge.

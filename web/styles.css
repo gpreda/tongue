@@ -414,6 +414,40 @@ header h1 {
     opacity: 0.8;
 }
 
+.synonym-challenge-notice {
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+}
+
+.synonym-challenge-notice.synonym-type {
+    background: rgba(46, 204, 113, 0.2);
+    color: #2ecc71;
+}
+
+.synonym-challenge-notice.antonym-type {
+    background: rgba(243, 156, 18, 0.2);
+    color: #f39c12;
+}
+
+.synonym-word-type {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+}
+
+.synonym-type .synonym-word-type {
+    background: rgba(46, 204, 113, 0.3);
+}
+
+.antonym-type .synonym-word-type {
+    background: rgba(243, 156, 18, 0.3);
+}
+
 .vocab-direction {
     background: rgba(46, 204, 113, 0.3);
     padding: 3px 10px;

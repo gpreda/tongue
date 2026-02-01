@@ -12,6 +12,7 @@ let hintWords = [];  // Words that were given as hints
 let isWordChallenge = false;  // Track if current task is a word challenge
 let isVocabChallenge = false;  // Track if current task is a vocab challenge
 let isVerbChallenge = false;  // Track if current task is a verb challenge
+let isSynonymChallenge = false; // Track if current task is a synonym/antonym challenge
 let isMultiVocab = false;     // Track if current task is a multi-word vocab challenge
 let isReverseVocab = false;   // Track if current task is reverse direction
 let multiVocabWords = [];     // Array of {word, translation} for multi-word challenges
@@ -95,6 +96,9 @@ const elements = {
     vocabDirection: document.getElementById('vocab-direction'),
     multiVocabInputs: document.getElementById('multi-vocab-inputs'),
     verbChallengeNotice: document.getElementById('verb-challenge-notice'),
+    synonymChallengeNotice: document.getElementById('synonym-challenge-notice'),
+    synonymChallengeLabel: document.getElementById('synonym-challenge-label'),
+    synonymWordType: document.getElementById('synonym-word-type'),
     tenseSelectRow: document.getElementById('tense-select-row'),
     tenseSelect: document.getElementById('tense-select'),
     taskPrompt: document.getElementById('task-prompt'),
@@ -274,6 +278,13 @@ async function getHint(sentence) {
     });
 }
 
+async function getVerbHint(sentence) {
+    return api('/api/verb-hint', {
+        method: 'POST',
+        body: JSON.stringify({ sentence, user_id: currentUser })
+    });
+}
+
 async function getMasteredWords() {
     return api(`/api/mastered-words?user_id=${encodeURIComponent(currentUser)}`);
 }
@@ -426,7 +437,8 @@ function showPreviousEvaluation(eval_data) {
         const challengeLabels = {
             'word': 'Word Challenge',
             'vocab': 'Vocabulary Quiz',
-            'verb': 'Verb Challenge'
+            'verb': 'Verb Challenge',
+            'synonym': 'Synonym/Antonym Challenge'
         };
         let label = challengeLabels[eval_data.challenge_type] || '';
         if (eval_data.challenge_direction) {
@@ -463,7 +475,7 @@ function showPreviousEvaluation(eval_data) {
     }
 }
 
-function showCurrentTask(sentence, isReview = false, isWordChal = false, challengeWord = null, isVocabChal = false, vocabChallenge = null, isVerbChal = false, verbChallenge = null) {
+function showCurrentTask(sentence, isReview = false, isWordChal = false, challengeWord = null, isVocabChal = false, vocabChallenge = null, isVerbChal = false, verbChallenge = null, isSynChal = false, synChallenge = null) {
     elements.loading.classList.add('hidden');
     elements.currentTask.classList.remove('hidden');
     elements.validationResult.classList.add('hidden');
@@ -493,12 +505,26 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
     elements.wordChallengeNotice.classList.add('hidden');
     elements.vocabChallengeNotice.classList.add('hidden');
     elements.verbChallengeNotice.classList.add('hidden');
+    elements.synonymChallengeNotice.classList.add('hidden');
     elements.tenseSelectRow.classList.add('hidden');
     elements.tenseSelect.value = '';
     elements.currentSentence.classList.remove('word-challenge');
 
     // Show appropriate challenge notice
-    if (isVerbChal && verbChallenge) {
+    if (isSynChal && synChallenge) {
+        const isSynonym = synChallenge.challenge_type === 'SYN';
+        const typeLabel = isSynonym ? 'Synonym' : 'Antonym';
+        elements.synonymChallengeNotice.classList.remove('hidden');
+        elements.synonymChallengeNotice.className = `synonym-challenge-notice ${isSynonym ? 'synonym-type' : 'antonym-type'}`;
+        elements.synonymChallengeLabel.textContent = `${typeLabel} Challenge!`;
+        elements.synonymWordType.textContent = synChallenge.type || '';
+        elements.taskPrompt.textContent = `Type a ${typeLabel.toLowerCase()} for:`;
+        elements.currentSentence.textContent = sentence;
+        elements.currentSentence.classList.add('word-challenge');
+        elements.translationInput.placeholder = `Enter a ${typeLabel.toLowerCase()} in ${currentLanguageName}...`;
+        elements.hintBtn.classList.add('hidden');
+        elements.translationInput.focus();
+    } else if (isVerbChal && verbChallenge) {
         elements.verbChallengeNotice.classList.remove('hidden');
         elements.tenseSelectRow.classList.remove('hidden');
         elements.taskPrompt.textContent = currentDirection === 'reverse'
@@ -508,7 +534,6 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
         elements.translationInput.placeholder = currentDirection === 'reverse'
             ? `Enter the ${currentLanguageName} verb form...`
             : 'Enter your English translation...';
-        elements.hintBtn.classList.add('hidden');
         elements.translationInput.focus();
     } else if (isVocabChal && vocabChallenge && vocabChallenge.is_multi) {
         // Multi-word vocab challenge
@@ -788,6 +813,7 @@ async function loadNextSentence() {
         isWordChallenge = data.is_word_challenge;
         isVocabChallenge = data.is_vocab_challenge;
         isVerbChallenge = data.is_verb_challenge;
+        isSynonymChallenge = data.is_synonym_challenge || false;
         currentDirection = data.direction || 'normal';
 
         // Update status bar
@@ -795,7 +821,7 @@ async function loadNextSentence() {
         updateStatusBar(status);
 
         // Render story (hide for challenges or when no story)
-        if (data.is_word_challenge || data.is_vocab_challenge || data.is_verb_challenge || !data.story) {
+        if (data.is_word_challenge || data.is_vocab_challenge || data.is_verb_challenge || data.is_synonym_challenge || !data.story) {
             elements.storySection.classList.add('hidden');
         } else {
             renderStory(data.story, data.difficulty, data.sentence);
@@ -809,7 +835,7 @@ async function loadNextSentence() {
         }
 
         // Show current task
-        showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word, data.is_vocab_challenge, data.vocab_challenge, data.is_verb_challenge, data.verb_challenge);
+        showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word, data.is_vocab_challenge, data.vocab_challenge, data.is_verb_challenge, data.verb_challenge, data.is_synonym_challenge, data.synonym_challenge);
 
         // Update API stats
         updateApiStats();
@@ -900,6 +926,18 @@ async function handleHint() {
     elements.hintBtn.textContent = 'Loading...';
 
     try {
+        if (isVerbChallenge) {
+            // Verb challenge: show conjugation rules
+            const verbHint = await getVerbHint(currentSentence);
+            let hintHtml = `<strong>${verbHint.tense.charAt(0).toUpperCase() + verbHint.tense.slice(1)} tense conjugation rules:</strong><br>`;
+            hintHtml += verbHint.rules.replace(/\n/g, '<br>');
+            elements.hintDisplay.innerHTML = hintHtml;
+            elements.hintDisplay.classList.remove('hidden');
+            hintUsed = true;
+            updateApiStats();
+            return;
+        }
+
         const hint = await getHint(currentSentence);
 
         // Filter out entries where the AI returned null values inside the array

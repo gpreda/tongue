@@ -23,3 +23,8 @@ __pycache__/
 # OS
 .DS_Store
 venv/
+
+# Claude session state
+.claude/prompt-history.jsonl
+.claude/current-task.md
+.claude/settings.local.json

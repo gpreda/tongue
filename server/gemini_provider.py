@@ -602,3 +602,100 @@ class GeminiProvider(AIProvider):
             logger.error(f"Failed to parse verb conjugation: {e}")
             logger.error(f"Raw response:\n{raw_response}")
             return None
+
+    def generate_synonym_antonym(self, word: str, language_info: dict = None) -> dict | None:
+        """Generate a synonym and antonym for a word in the target language.
+        Returns dict with 'synonym' and 'antonym' (antonym may be None) or None on error."""
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
+        prompt = f"""
+            Given the {lang_name} word '{word}', provide a common synonym and a common antonym
+            (if a natural antonym exists).
+
+            Return ONLY a Python dictionary in this exact format:
+            {{'synonym': 'synonym_word', 'antonym': 'antonym_word'}}
+
+            Use None if no natural synonym exists.
+            Use None if no natural antonym exists.
+
+            Examples:
+            - "grande" -> {{'synonym': 'enorme', 'antonym': 'pequeño'}}
+            - "casa" -> {{'synonym': 'hogar', 'antonym': None}}
+            - "rápido" -> {{'synonym': 'veloz', 'antonym': 'lento'}}
+
+            Return ONLY the dictionary, no other text.
+        """
+        try:
+            response, ms, token_stats = self._execute_chat(prompt)
+            self._record_stats('synonym_challenge', ms, token_stats)
+            response = response.strip()
+            response = response.replace('```python', '').replace('```', '')
+            response = response.replace('null', 'None')
+            result = eval(response)
+            if isinstance(result, dict):
+                return result
+            return None
+        except Exception as e:
+            logger.error(f"Failed to generate synonym/antonym for '{word}': {e}")
+            return None
+
+    def validate_synonym_antonym(self, word: str, challenge_type: str, expected: str,
+                                  student_answer: str, language_info: dict = None) -> dict:
+        """Validate if the student's answer is a valid synonym/antonym.
+        Returns dict with 'correct' (bool) and 'explanation' (str)."""
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
+        type_label = 'synonym' if challenge_type == 'SYN' else 'antonym'
+        prompt = f"""
+            A student was asked for a {type_label} of the {lang_name} word "{word}".
+            The expected answer was: "{expected}"
+            The student answered: "{student_answer}"
+
+            Is the student's answer a valid {type_label} of "{word}" in {lang_name}?
+            Accept common, natural {type_label}s even if they differ from the expected answer.
+
+            Respond with ONLY a Python dictionary:
+            {{'correct': True/False, 'explanation': 'brief reason'}}
+        """
+        try:
+            response, ms, token_stats = self._execute_chat(prompt)
+            self._record_stats('synonym_challenge', ms, token_stats)
+            response = response.strip().replace('```python', '').replace('```', '')
+            response = response.replace('true', 'True').replace('false', 'False')
+            result = eval(response)
+            if isinstance(result, dict) and 'correct' in result:
+                return result
+        except Exception as e:
+            logger.error(f"Failed to validate synonym/antonym: {e}")
+        return {'correct': False, 'explanation': 'Could not evaluate'}
+
+    def generate_conjugation_rules(self, tense: str, language_info: dict = None) -> str | None:
+        """Generate a concise conjugation rules summary for a tense in the target language.
+        Returns plain text string or None on error."""
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
+
+        prompt = f"""
+            Write a concise conjugation cheat-sheet for the {tense} tense in {lang_name}.
+
+            Requirements:
+            - Show the regular verb endings/patterns grouped by verb class (e.g. -ar, -er, -ir for Spanish)
+            - For each pattern, show all person forms with a common example verb
+            - Keep it short: just the conjugation table, no lengthy explanations
+            - Use plain text, no markdown
+
+            Example format for Spanish present tense:
+            -ar (hablar): yo hablo, tú hablas, él/ella habla, nosotros hablamos, ellos/ellas hablan
+            -er (comer): yo como, tú comes, él/ella come, nosotros comemos, ellos/ellas comen
+            -ir (vivir): yo vivo, tú vives, él/ella vive, nosotros vivimos, ellos/ellas viven
+
+            Adapt the format to {lang_name} grammar (e.g. different verb classes, different pronoun system).
+            Return ONLY the conjugation patterns, no other text.
+        """
+        try:
+            response, ms, token_stats = self._execute_chat(prompt)
+            self._record_stats('verb_hint', ms, token_stats)
+            return response.strip() if response else None
+        except Exception as e:
+            logger.error(f"Failed to generate conjugation rules: {e}")
+            return None

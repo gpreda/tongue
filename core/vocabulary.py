@@ -185,6 +185,40 @@ VOCABULARY_CHALLENGES = {
             'guante': 'glove',
             'bufanda': 'scarf'
         }
+    },
+    'house': {
+        'name': 'House',
+        'items': {
+            'cocina': 'kitchen',
+            'baño': 'bathroom',
+            'dormitorio': 'bedroom',
+            'sala': 'living room',
+            'puerta': 'door',
+            'ventana': 'window',
+            'pared': 'wall',
+            'suelo': 'floor',
+            'techo': 'roof',
+            'escalera': 'stairs',
+            'mesa': 'table',
+            'silla': 'chair'
+        }
+    },
+    'traffic': {
+        'name': 'Traffic',
+        'items': {
+            'coche': 'car',
+            'autobús': 'bus',
+            'calle': 'street',
+            'semáforo': 'traffic light',
+            'señal': 'stop sign,sign',
+            'acera': 'sidewalk',
+            'puente': 'bridge',
+            'autopista': 'highway',
+            'bicicleta': 'bicycle,bike',
+            'camión': 'truck',
+            'aparcamiento': 'parking',
+            'cruce': 'crosswalk,crossing'
+        }
     }
 }
 
