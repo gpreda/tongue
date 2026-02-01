@@ -1002,7 +1002,6 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             'challenge_type': prev_challenge_type,
             'challenge_direction': prev_challenge_direction
         }
-        history.last_evaluated_round = None
 
     # For challenges, return just the word; for sentences, return the sentence
     sentence = round.sentence

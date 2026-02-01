@@ -162,15 +162,18 @@ class GeminiProvider(AIProvider):
             - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
               The student will translate these English sentences into {lang_name}.
               The difficulty refers to the {lang_name} translation complexity:
-              Level 1 = use only basic English that translates to simple {lang_name} (present tense, common words like "the cat is big", "I eat food", "she has a house")
+              Level 0 = absolute beginner (very simple 2-4 word sentences, kids-level vocabulary like "the cat is big", "I like food", present tense only)
+              Level 1 = beginner (present tense, common words like "I eat food", "she has a house")
               Level 5 = intermediate (sentences requiring varied {lang_name} vocabulary, multiple tenses)
               Level 10 = expert (sentences requiring advanced {lang_name}: complex grammar, idioms)
-            - IMPORTANT: At level 1, use very simple, short sentences with basic everyday words only. No uncommon nouns like "meadow", "stream", "trail". Stick to: cat, dog, house, food, water, school, friend, family, etc."""
+            - IMPORTANT: At level 0, sentences MUST be 2-4 words only. Use the simplest everyday words: cat, dog, big, small, food, water, good, bad, red, blue.
+            - At level 1, use very simple, short sentences with basic everyday words only. No uncommon nouns like "meadow", "stream", "trail". Stick to: cat, dog, house, food, water, school, friend, family, etc."""
         else:
             story_language = lang_name
             target_language = 'English'
             difficulty_description = f"""
             - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
+              Level 0 = absolute beginner (very simple 2-4 word sentences, kids-level vocabulary like "the cat is big", "I like food", present tense only)
               Level 1 = beginner (simple vocabulary, present tense, basic grammar)
               Level 5 = intermediate (varied vocabulary, multiple tenses, compound sentences)
               Level 10 = expert (advanced vocabulary, complex grammar, idioms)"""
@@ -187,7 +190,7 @@ class GeminiProvider(AIProvider):
 
             Requirements:
             {difficulty_description}
-            - Each sentence should be 5-20 words long
+            - Each sentence should be {'2-4' if difficulty == 0 else '5-20'} words long
             - Use vocabulary and grammar appropriate for level {difficulty}
             - Try to avoid using these nouns (the student already knows them): {', '.join(avoided_words) if avoided_words else 'none'}{script_instruction}
 
@@ -259,6 +262,10 @@ class GeminiProvider(AIProvider):
                - Reflexive pronouns (se, me, te) that are naturally absorbed into English phrasal verbs
                  (e.g., "se pone" → "puts on" is correct, don't require "himself/herself")
                - Grammar elements that have no direct equivalent when the meaning is preserved
+               - Omitting subject pronouns (I, he, she, it, they, etc.) in pro-drop languages where
+                 the subject is implied or unnecessary (e.g., "It is winter" → "Zima je" is correct,
+                 "I eat" → "Como" is correct — do NOT require an explicit pronoun)
+               - Different but valid word order (e.g., "Zima je" vs "Je zima" — both valid)
             5. Only proper nouns (names of people, places, brands) may remain in original form.
                Common nouns MUST be translated.
             6. If the translation is semantically correct with all words properly translated, the score should be 100.

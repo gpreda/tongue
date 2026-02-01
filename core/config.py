@@ -1,7 +1,7 @@
 """Configuration constants for tongue application."""
 
 DEFAULT_LANGUAGE = 'es'
-MIN_DIFFICULTY = 1
+MIN_DIFFICULTY = 0
 MAX_DIFFICULTY = 10
 
 # Advancement criteria

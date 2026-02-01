@@ -328,7 +328,7 @@ class FileStorage(Storage):
             'code': 'sr-latn',
             'name': 'Srpski (latinica)',
             'script': 'latin',
-            'english_name': 'Serbian',
+            'english_name': 'Serbian (Latin)',
             'tenses': ['present', 'past', 'future', 'imperative', 'conditional'],
             'accent_words': []
         },
@@ -336,7 +336,7 @@ class FileStorage(Storage):
             'code': 'sr-cyrl',
             'name': 'Српски (ћирилица)',
             'script': 'cyrillic',
-            'english_name': 'Serbian',
+            'english_name': 'Serbian (Cyrillic)',
             'tenses': ['present', 'past', 'future', 'imperative', 'conditional'],
             'accent_words': []
         }

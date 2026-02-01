@@ -161,7 +161,7 @@ class MockStorage(Storage):
             {'code': 'es', 'name': 'Español', 'script': 'latin', 'english_name': 'Spanish',
              'tenses': ['present', 'preterite', 'imperfect', 'future', 'conditional', 'subjunctive'],
              'accent_words': []},
-            {'code': 'sr-latn', 'name': 'Srpski (latinica)', 'script': 'latin', 'english_name': 'Serbian',
+            {'code': 'sr-latn', 'name': 'Srpski (latinica)', 'script': 'latin', 'english_name': 'Serbian (Latin)',
              'tenses': ['present', 'past', 'future', 'imperative', 'conditional'],
              'accent_words': []}
         ]
@@ -820,6 +820,97 @@ class TestMockStorage(unittest.TestCase):
         self.assertEqual(len(storage.save_calls), 2)
         self.assertEqual(storage.save_calls[0]['difficulty'], 3)
         self.assertEqual(storage.save_calls[1]['difficulty'], 4)
+
+
+class TestPracticeTimeTracking(unittest.TestCase):
+    """Tests for per-language+direction practice time tracking."""
+
+    def test_practice_times_initially_empty(self):
+        history = History()
+        self.assertEqual(history.practice_times, {})
+        self.assertEqual(history.practice_time_seconds, 0)
+
+    def test_record_practice_time_uses_language_direction_key(self):
+        history = History()
+        history.language = 'es'
+        history.direction = 'normal'
+        history.record_practice_time(60.0)
+        self.assertEqual(history.practice_times, {'es:normal': 60.0})
+
+    def test_record_practice_time_accumulates(self):
+        history = History()
+        history.language = 'es'
+        history.direction = 'normal'
+        history.record_practice_time(30.0)
+        history.record_practice_time(45.0)
+        self.assertAlmostEqual(history.practice_times['es:normal'], 75.0)
+
+    def test_record_practice_time_multiple_keys(self):
+        history = History()
+        history.language = 'es'
+        history.direction = 'normal'
+        history.record_practice_time(30.0)
+        history.language = 'es'
+        history.direction = 'reverse'
+        history.record_practice_time(20.0)
+        history.language = 'sr-cyrl'
+        history.direction = 'normal'
+        history.record_practice_time(15.0)
+        self.assertEqual(history.practice_times['es:normal'], 30.0)
+        self.assertEqual(history.practice_times['es:reverse'], 20.0)
+        self.assertEqual(history.practice_times['sr-cyrl:normal'], 15.0)
+
+    def test_practice_time_seconds_property_sums_all(self):
+        history = History()
+        history.practice_times = {'es:normal': 100, 'es:reverse': 50, 'sr-cyrl:normal': 200}
+        self.assertEqual(history.practice_time_seconds, 350)
+
+    def test_practice_time_seconds_property_empty(self):
+        history = History()
+        self.assertEqual(history.practice_time_seconds, 0)
+
+    def test_to_dict_serializes_practice_times(self):
+        history = History()
+        history.practice_times = {'es:normal': 120}
+        data = history.to_dict()
+        self.assertEqual(data['practice_times'], {'es:normal': 120})
+        self.assertNotIn('practice_time_seconds', data)
+
+    def test_from_dict_loads_practice_times(self):
+        data = {'practice_times': {'es:normal': 300, 'sr-latn:reverse': 100}}
+        history = History.from_dict(data)
+        self.assertEqual(history.practice_times, {'es:normal': 300, 'sr-latn:reverse': 100})
+        self.assertEqual(history.practice_time_seconds, 400)
+
+    def test_from_dict_migrates_old_scalar(self):
+        """Old data with practice_time_seconds scalar should be migrated."""
+        data = {'practice_time_seconds': 600, 'language': 'es', 'direction': 'normal'}
+        history = History.from_dict(data)
+        self.assertEqual(history.practice_times, {'es:normal': 600})
+        self.assertEqual(history.practice_time_seconds, 600)
+
+    def test_from_dict_migrates_old_scalar_reverse(self):
+        data = {'practice_time_seconds': 120, 'language': 'sr-cyrl', 'direction': 'reverse'}
+        history = History.from_dict(data)
+        self.assertEqual(history.practice_times, {'sr-cyrl:reverse': 120})
+
+    def test_from_dict_migrates_zero_scalar(self):
+        data = {'practice_time_seconds': 0}
+        history = History.from_dict(data)
+        self.assertEqual(history.practice_times, {})
+
+    def test_from_dict_no_practice_data(self):
+        data = {}
+        history = History.from_dict(data)
+        self.assertEqual(history.practice_times, {})
+
+    def test_roundtrip_preserves_practice_times(self):
+        history = History()
+        history.practice_times = {'es:normal': 500, 'es:reverse': 200}
+        data = history.to_dict()
+        restored = History.from_dict(data)
+        self.assertEqual(restored.practice_times, {'es:normal': 500, 'es:reverse': 200})
+        self.assertEqual(restored.practice_time_seconds, 700)
 
 
 if __name__ == '__main__':

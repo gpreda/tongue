@@ -93,11 +93,11 @@ class PostgresStorage(Storage):
                      '["present", "preterite", "imperfect", "future", "conditional", "subjunctive"]'::jsonb,
                      '["el", "tu", "mi", "si", "se", "de", "te", "mas", "que", "como", "donde", "cuando", "cual", "quien", "aun", "solo"]'::jsonb,
                      TRUE),
-                    ('sr-latn', 'Srpski (latinica)', 'latin', 'Serbian',
+                    ('sr-latn', 'Srpski (latinica)', 'latin', 'Serbian (Latin)',
                      '["present", "past", "future", "imperative", "conditional"]'::jsonb,
                      '[]'::jsonb,
                      TRUE),
-                    ('sr-cyrl', 'Српски (ћирилица)', 'cyrillic', 'Serbian',
+                    ('sr-cyrl', 'Српски (ћирилица)', 'cyrillic', 'Serbian (Cyrillic)',
                      '["present", "past", "future", "imperative", "conditional"]'::jsonb,
                      '[]'::jsonb,
                      TRUE)
@@ -763,6 +763,10 @@ class PostgresStorage(Storage):
                 return None
         except Exception as e:
             print(f"Error loading API stats: {e}")
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
             return None
 
     def save_api_stats(self, provider_name: str, stats: dict) -> None:

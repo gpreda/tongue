@@ -78,8 +78,8 @@ class History:
             'vocab': {'correct': 0, 'incorrect': 0},
             'verb': {'correct': 0, 'incorrect': 0}
         }
-        # Practice time tracking (seconds spent actively practicing)
-        self.practice_time_seconds = 0
+        # Practice time tracking per language+direction key, e.g. {"es:normal": 120.5}
+        self.practice_times = {}
         # Direction mode: 'normal' (ES→EN) or 'reverse' (EN→ES)
         self.direction = 'normal'
         self._reverse_state = None
@@ -87,7 +87,12 @@ class History:
         self.language = 'es'
         self._language_states = {}
 
-    # Fields that are swapped per-direction (everything except practice_time_seconds)
+    @property
+    def practice_time_seconds(self) -> float:
+        """Total practice time across all languages and directions (backward compat)."""
+        return sum(self.practice_times.values())
+
+    # Fields that are swapped per-direction (everything except practice_times)
     _DIRECTION_FIELDS = [
         'rounds', 'correct_words', 'missed_words', 'words', 'difficulty',
         'level_scores', 'total_completed', 'current_story', 'story_sentences',
@@ -197,7 +202,9 @@ class History:
             'vocab_progress': self.vocab_progress,
             'vocab_progress_version': self.vocab_progress_version,
             'challenge_stats': self.challenge_stats,
-            'practice_time_seconds': self.practice_time_seconds,
+            'last_evaluated_round': self.last_evaluated_round.to_dict() if self.last_evaluated_round else None,
+            'last_level_changed': self.last_level_changed,
+            'practice_times': self.practice_times,
             'direction': self.direction,
             '_reverse_state': self._serialize_reverse_state(),
             'language': self.language,
@@ -250,7 +257,23 @@ class History:
             'vocab': {'correct': 0, 'incorrect': 0},
             'verb': {'correct': 0, 'incorrect': 0}
         })
-        history.practice_time_seconds = data.get('practice_time_seconds', 0)
+        last_eval = data.get('last_evaluated_round')
+        history.last_evaluated_round = TongueRound.from_dict(last_eval) if last_eval else None
+        history.last_level_changed = data.get('last_level_changed', False)
+        # Migrate from old scalar practice_time_seconds to per-key practice_times dict
+        if 'practice_times' in data and isinstance(data['practice_times'], dict):
+            history.practice_times = data['practice_times']
+        elif 'practice_time_seconds' in data and isinstance(data['practice_time_seconds'], (int, float)):
+            old_val = data['practice_time_seconds']
+            if old_val > 0:
+                # Migrate old scalar into the default language+direction key
+                lang = data.get('language', 'es')
+                direction = data.get('direction', 'normal')
+                history.practice_times = {f"{lang}:{direction}": old_val}
+            else:
+                history.practice_times = {}
+        else:
+            history.practice_times = {}
         history.direction = data.get('direction', 'normal')
         history._reverse_state = data.get('_reverse_state', None)
         history.language = data.get('language', 'es')
@@ -716,6 +739,7 @@ class History:
         """Record practice time if within threshold. Returns True if recorded."""
         from core.config import PRACTICE_TIME_INACTIVITY_THRESHOLD
         if 0 < delta_seconds <= PRACTICE_TIME_INACTIVITY_THRESHOLD:
-            self.practice_time_seconds += delta_seconds
+            key = f"{self.language}:{self.direction}"
+            self.practice_times[key] = self.practice_times.get(key, 0) + delta_seconds
             return True
         return False
