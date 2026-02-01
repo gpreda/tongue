@@ -92,6 +92,12 @@ class History:
         """Total practice time across all languages and directions (backward compat)."""
         return sum(self.practice_times.values())
 
+    @property
+    def current_practice_time_seconds(self) -> float:
+        """Practice time for the current language:direction."""
+        key = f"{self.language}:{self.direction}"
+        return self.practice_times.get(key, 0)
+
     # Fields that are swapped per-direction (everything except practice_times)
     _DIRECTION_FIELDS = [
         'rounds', 'correct_words', 'missed_words', 'words', 'difficulty',
