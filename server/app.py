@@ -208,6 +208,7 @@ class StatusResponse(BaseModel):
     challenge_stats_display: str  # "12/15" format
     practice_time_seconds: int
     practice_time_display: str  # Human-readable format like "2h 15m"
+    practice_times: dict = {}  # Per language+direction breakdown, e.g. {"es:normal": 1380}
     direction: str = 'normal'  # 'normal' (ES→EN) or 'reverse' (EN→ES)
     tenses: list[str] = []  # Available tenses for current language
 
@@ -634,6 +635,7 @@ async def get_status(user_id: str = "default"):
             challenge_stats_display=history.get_challenge_stats_display(),
             practice_time_seconds=int(history.practice_time_seconds),
             practice_time_display=format_practice_time(int(history.practice_time_seconds)),
+            practice_times={k: int(v) for k, v in history.practice_times.items()},
             direction=history.direction,
             tenses=lang_info.get('tenses', [])
         )
@@ -992,6 +994,9 @@ async def _get_next_sentence_inner(user_id: str = "default"):
     sentence = round.sentence
     if is_word_challenge and sentence.startswith("WORD:"):
         sentence = sentence[5:]  # Remove prefix for display
+        # Reverse mode: show English translation, user types target language word
+        if history.direction == 'reverse' and challenge_word:
+            sentence = challenge_word.get('translation', sentence)
     elif is_vocab_challenge and (sentence.startswith("VOCAB4:") or sentence.startswith("VOCAB4R:")):
         # Multi-word: the vocab_challenge dict has words with Spanish 'word' fields
         # sentence field isn't displayed for multi-word (UI hides it)
@@ -1082,6 +1087,8 @@ async def submit_translation(request: TranslationRequest):
         current_round = history.rounds[-1]
         if current_round.evaluated:
             raise HTTPException(status_code=400, detail="Round already evaluated")
+
+        logger.info(f"Submit: round_sentence={current_round.sentence!r}, request_sentence={request.sentence!r}, direction={history.direction}")
 
         # Handle different challenge types
         is_word_challenge = current_round.sentence.startswith("WORD:")
@@ -1179,9 +1186,10 @@ async def submit_translation(request: TranslationRequest):
             }
             judge_ms = 0
 
-            # Verify sentence matches
-            if conjugated_form != request.sentence:
-                raise HTTPException(status_code=400, detail="Sentence mismatch")
+            # Log sentence mismatch as warning (don't block submission — evaluation uses server state)
+            expected_sentence = english_translation if history.direction == 'reverse' else conjugated_form
+            if expected_sentence != request.sentence:
+                logger.warning(f"Verb sentence mismatch: expected={expected_sentence!r}, got={request.sentence!r}, direction={history.direction}")
 
         elif is_multi_vocab:
             # Multi-word vocabulary challenge (4 words, stored as english keys)
@@ -1320,9 +1328,9 @@ async def submit_translation(request: TranslationRequest):
             # Record vocab challenge result by english key
             history.record_vocab_result(category, english_key, is_correct)
 
-            # Verify sentence matches (frontend sends the displayed word as sentence)
+            # Log sentence mismatch as warning (don't block submission — evaluation uses server state)
             if displayed_word != request.sentence:
-                raise HTTPException(status_code=400, detail="Sentence mismatch")
+                logger.warning(f"Vocab sentence mismatch: expected={displayed_word!r}, got={request.sentence!r}")
 
         elif is_word_challenge:
             # Word challenge: get translation from storage or AI
@@ -1330,14 +1338,11 @@ async def submit_translation(request: TranslationRequest):
             logger.info(f"Word challenge for word: {word}")
 
             if history.direction == 'reverse':
-                # Reverse mode (EN→ES): word is English, correct answer is Spanish
-                # Use translation from word history (which stores Spanish translations in reverse mode)
+                # Reverse mode (EN→target): user saw English translation, correct answer is the target word itself
                 word_info = history.words.get(word, {})
-                correct_translation = word_info.get('translation') or ''
+                correct_translation = word  # The target language word IS the answer
                 word_type = word_info.get('type') or 'unknown'
-                if isinstance(correct_translation, list):
-                    correct_translation = ', '.join(correct_translation)
-                logger.info(f"Reverse word challenge: {word} -> {correct_translation} ({word_type})")
+                logger.info(f"Reverse word challenge: {word_info.get('translation', '?')} -> {correct_translation} ({word_type})")
             else:
                 # Normal mode (ES→EN): word is Spanish, correct answer is English
                 # First check persistent storage for translation
@@ -1404,13 +1409,13 @@ async def submit_translation(request: TranslationRequest):
             }
             judge_ms = 0
 
-            # Verify sentence matches (use the word for word challenges)
+            # Log sentence mismatch as warning (don't block submission — evaluation uses server state)
             if word != request.sentence:
-                raise HTTPException(status_code=400, detail="Sentence mismatch")
+                logger.warning(f"Word sentence mismatch: expected={word!r}, got={request.sentence!r}")
         else:
-            # Regular sentence: AI validation
+            # Regular sentence: AI validation uses current_round.sentence (server state)
             if current_round.sentence != request.sentence:
-                raise HTTPException(status_code=400, detail="Sentence mismatch")
+                logger.warning(f"Regular sentence mismatch: expected={current_round.sentence!r}, got={request.sentence!r}")
 
             # Script validation for reverse mode (student types target language)
             if history.direction == 'reverse' and script != 'latin':
@@ -1422,7 +1427,7 @@ async def submit_translation(request: TranslationRequest):
                     )
 
             judgement, judge_ms = ai_provider.validate_translation(
-                request.sentence,
+                current_round.sentence,
                 request.translation,
                 story_context=history.current_story,
                 direction=history.direction,
