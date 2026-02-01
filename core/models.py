@@ -472,6 +472,11 @@ class History:
             else:
                 word = v_breakdown[0]
                 english = v_breakdown[1]
+            # AI may return lists instead of strings; coerce to str
+            if isinstance(word, list):
+                word = ' '.join(str(w) for w in word)
+            if isinstance(english, list):
+                english = ', '.join(str(e) for e in english)
             part_of_speech = (v_breakdown[2] or 'unknown').lower()
             was_correct = v_breakdown[3]
 
