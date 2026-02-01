@@ -281,8 +281,10 @@ def format_practice_time(seconds: int) -> str:
     """Format seconds as human-readable time."""
     if seconds < 60:
         return f"{seconds}s"
-    elif seconds < 3600:
+    elif seconds < 600:
         return f"{seconds // 60}m {seconds % 60}s"
+    elif seconds < 3600:
+        return f"{seconds // 60}m"
     else:
         hours = seconds // 3600
         minutes = (seconds % 3600) // 60
