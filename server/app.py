@@ -996,7 +996,8 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         sentence = sentence[5:]  # Remove prefix for display
         # Reverse mode: show English translation, user types target language word
         if history.direction == 'reverse' and challenge_word:
-            sentence = challenge_word.get('translation', sentence)
+            trans = challenge_word.get('translation', sentence)
+            sentence = ', '.join(trans) if isinstance(trans, list) else trans
     elif is_vocab_challenge and (sentence.startswith("VOCAB4:") or sentence.startswith("VOCAB4R:")):
         # Multi-word: the vocab_challenge dict has words with Spanish 'word' fields
         # sentence field isn't displayed for multi-word (UI hides it)
