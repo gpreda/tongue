@@ -458,8 +458,14 @@ class History:
         for v_breakdown in round.judgement['vocabulary_breakdown']:
             if not isinstance(v_breakdown, (list, tuple)) or len(v_breakdown) < 4:
                 continue
-            word = v_breakdown[0]
-            english = v_breakdown[1]
+            # In normal mode, breakdown is [target_word, english, pos, correct]
+            # In reverse mode, breakdown is [english, target_word, pos, correct]
+            if self.direction == 'reverse':
+                word = v_breakdown[1]
+                english = v_breakdown[0]
+            else:
+                word = v_breakdown[0]
+                english = v_breakdown[1]
             part_of_speech = (v_breakdown[2] or 'unknown').lower()
             was_correct = v_breakdown[3]
 
