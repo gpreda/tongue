@@ -428,7 +428,11 @@ function showPreviousEvaluation(eval_data) {
             'vocab': 'Vocabulary Quiz',
             'verb': 'Verb Challenge'
         };
-        elements.prevChallengeType.textContent = challengeLabels[eval_data.challenge_type] || '';
+        let label = challengeLabels[eval_data.challenge_type] || '';
+        if (eval_data.challenge_direction) {
+            label += ` (${eval_data.challenge_direction})`;
+        }
+        elements.prevChallengeType.textContent = label;
         elements.prevChallengeType.classList.remove('hidden');
         elements.prevSentenceLabel.textContent = 'Word:';
     } else {
@@ -665,6 +669,15 @@ function showValidationResult(result, studentTranslation) {
     }, delay);
 }
 
+function formatPracticeTime(seconds) {
+    seconds = Math.floor(seconds);
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
+}
+
 async function showStatusModal() {
     try {
         const status = await getStatus();
@@ -672,6 +685,24 @@ async function showStatusModal() {
         const avgScore = status.level_scores.length > 0
             ? (status.level_scores.reduce((a, b) => a + b, 0) / status.level_scores.length).toFixed(1)
             : 'N/A';
+
+        // Build practice time breakdown HTML
+        let practiceBreakdownHtml = '';
+        if (status.practice_times && Object.keys(status.practice_times).length > 0) {
+            const entries = Object.entries(status.practice_times)
+                .filter(([, secs]) => secs > 0)
+                .sort((a, b) => b[1] - a[1]);
+            if (entries.length > 0) {
+                practiceBreakdownHtml = '<p><strong>Practice Time Breakdown:</strong></p><ul style="margin:4px 0 8px 20px">';
+                for (const [key, secs] of entries) {
+                    const [lang, dir] = key.split(':');
+                    const label = `${lang} ${dir}`;
+                    const display = formatPracticeTime(secs);
+                    practiceBreakdownHtml += `<li>${label}: ${display}</li>`;
+                }
+                practiceBreakdownHtml += '</ul>';
+            }
+        }
 
         elements.statusDetails.innerHTML = `
             <p><strong>Language:</strong> ${status.language}</p>
@@ -681,6 +712,8 @@ async function showStatusModal() {
             <p><strong>Recent Average:</strong> ${avgScore}</p>
             <p><strong>Credits (≥80 score):</strong> ${status.good_score_count}/7 needed to advance</p>
             <p><strong>Poor Scores (<50):</strong> ${status.poor_score_count}/4 triggers demotion</p>
+            <p><strong>Total Practice Time:</strong> ${status.practice_time_display}</p>
+            ${practiceBreakdownHtml}
         `;
 
         elements.statusModal.classList.remove('hidden');

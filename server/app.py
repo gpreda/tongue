@@ -978,6 +978,19 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             prev_challenge_type = 'verb'
             prev_sentence = prev_sentence[5:]  # Remove VERB: prefix
 
+        # Determine challenge direction for display
+        prev_challenge_direction = None
+        if prev_challenge_type:
+            lang_upper = lang_code.upper()
+            if prev_challenge_type == 'vocab':
+                # Vocab challenges have per-challenge direction via prefix
+                is_rev = prev.sentence.startswith("VOCABR:") or prev.sentence.startswith("VOCAB4R:")
+                prev_challenge_direction = f"EN → {lang_upper}" if is_rev else f"{lang_upper} → EN"
+            else:
+                # Word and verb challenges use the session direction
+                is_rev = history.direction == 'reverse'
+                prev_challenge_direction = f"EN → {lang_upper}" if is_rev else f"{lang_upper} → EN"
+
         previous_eval = {
             'sentence': prev_sentence,
             'translation': prev.translation,
@@ -986,7 +999,8 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             'evaluation': prev.judgement.get('evaluation') if prev.judgement else None,
             'judge_ms': prev.judge_ms,
             'level_changed': history.last_level_changed,
-            'challenge_type': prev_challenge_type
+            'challenge_type': prev_challenge_type,
+            'challenge_direction': prev_challenge_direction
         }
         history.last_evaluated_round = None
 
