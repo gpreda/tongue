@@ -1016,20 +1016,39 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         prev_challenge_type = None
         if prev_sentence.startswith("WORD:"):
             prev_challenge_type = 'word'
-            prev_sentence = prev_sentence[5:]  # Remove WORD: prefix
+            word = prev_sentence[5:]  # Remove WORD: prefix
+            # In reverse mode user was shown English, so display English
+            if history.direction == 'reverse':
+                word_info = history.words.get(word, {})
+                trans = word_info.get('translation', '')
+                if isinstance(trans, list):
+                    trans = ', '.join(trans)
+                if trans and trans.lower().strip() != word.lower().strip():
+                    prev_sentence = trans
+                else:
+                    # Fallback: try persistent storage
+                    stored = storage.get_word_translation(word, language=lang_code)
+                    prev_sentence = stored['translation'] if stored else word
+            else:
+                prev_sentence = word
         elif prev_sentence.startswith("VOCAB4R:") or prev_sentence.startswith("VOCAB4:"):
             prev_challenge_type = 'vocab'
-            prefix = "VOCAB4R:" if prev_sentence.startswith("VOCAB4R:") else "VOCAB4:"
+            is_rev_vocab = prev_sentence.startswith("VOCAB4R:")
+            prefix = "VOCAB4R:" if is_rev_vocab else "VOCAB4:"
             rest = prev_sentence[len(prefix):]
             parts = rest.split(":", 1)
             if len(parts) == 2:
-                # Look up Spanish words from english keys for display
                 eng_keys = parts[1].split(",")
-                spanish_words = []
-                for ek in eng_keys:
-                    item = storage.get_vocab_item_by_english(parts[0], ek, language=lang_code)
-                    spanish_words.append(item['word'] if item else ek)
-                prev_sentence = ', '.join(spanish_words)
+                if is_rev_vocab:
+                    # Reverse: user saw English words
+                    prev_sentence = ', '.join(eng_keys)
+                else:
+                    # Normal: user saw target language words
+                    target_words = []
+                    for ek in eng_keys:
+                        item = storage.get_vocab_item_by_english(parts[0], ek, language=lang_code)
+                        target_words.append(item['word'] if item else ek)
+                    prev_sentence = ', '.join(target_words)
             else:
                 prev_sentence = prev_sentence
         elif prev_sentence.startswith("VOCABR:") or prev_sentence.startswith("VOCAB:"):
@@ -1048,7 +1067,13 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 prev_sentence = prev_sentence
         elif prev_sentence.startswith("VERB:"):
             prev_challenge_type = 'verb'
-            prev_sentence = prev_sentence[5:]  # Remove VERB: prefix
+            conjugated = prev_sentence[5:]  # Remove VERB: prefix
+            # In reverse mode user was shown English, so display English
+            if history.direction == 'reverse':
+                stored = storage.get_verb_conjugation(conjugated, language=lang_code)
+                prev_sentence = stored.get('translation', conjugated) if stored else conjugated
+            else:
+                prev_sentence = conjugated
         elif prev_sentence.startswith("SYN:") or prev_sentence.startswith("ANT:"):
             prev_challenge_type = 'synonym'
             prev_sentence = prev_sentence[4:]  # Remove SYN: or ANT: prefix
@@ -1088,7 +1113,13 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         # Reverse mode: show English translation, user types target language word
         if history.direction == 'reverse' and challenge_word:
             trans = challenge_word.get('translation', sentence)
-            sentence = ', '.join(trans) if isinstance(trans, list) else trans
+            if isinstance(trans, list):
+                trans = ', '.join(trans)
+            # Guard: if translation is empty or same as the word (bad data from AI),
+            # keep showing the original word — the challenge will still work in forward mode
+            original_word = sentence
+            if trans and trans.lower().strip() != original_word.lower().strip():
+                sentence = trans
     elif is_vocab_challenge and (sentence.startswith("VOCAB4:") or sentence.startswith("VOCAB4R:")):
         # Multi-word: the vocab_challenge dict has words with Spanish 'word' fields
         # sentence field isn't displayed for multi-word (UI hides it)
@@ -1219,8 +1250,18 @@ async def submit_translation(request: TranslationRequest):
             syn_word = current_round.sentence[4:]  # Remove SYN: or ANT: prefix
             logger.info(f"Synonym challenge for: {syn_word} (type={challenge_type})")
 
-            # Get cached synonym/antonym
+            # Get cached synonym/antonym — regenerate via AI if cache was lost
+            # (e.g., server restart with file storage, or DB connection hiccup)
             cached = storage.get_synonym_antonym(syn_word, language=lang_code)
+            if not cached:
+                logger.warning(f"Synonym/antonym cache miss for '{syn_word}', regenerating via AI")
+                ai_result = ai_provider.generate_synonym_antonym(syn_word, language_info=lang_info)
+                if ai_result:
+                    storage.save_synonym_antonym(
+                        syn_word, lang_code,
+                        ai_result.get('synonym'), ai_result.get('antonym')
+                    )
+                    cached = ai_result
             if not cached:
                 raise HTTPException(status_code=500, detail="Synonym/antonym data not found")
 
