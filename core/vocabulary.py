@@ -338,6 +338,12 @@ def get_category_items_with_english(category: str, language: str = 'es') -> list
     ]
 
 
+def _word_matches_alternatives(word: str, alternatives: str) -> bool:
+    """Check if a target-language word is identical to any of its English alternatives."""
+    alts = [a.strip().lower() for a in alternatives.split(',')]
+    return word.strip().lower() in alts
+
+
 def get_random_challenge(category: str, reverse: bool = False, language: str = 'es') -> dict | None:
     """Get a random word from a category.
 
@@ -346,6 +352,15 @@ def get_random_challenge(category: str, reverse: bool = False, language: str = '
     items_list = get_category_items_with_english(category, language)
     if not items_list:
         return None
+
+    # In reverse mode, exclude items where the word is the same as its English
+    # translation (e.g., Serbian "april" = English "april") — asking the user
+    # to translate a word to itself is pointless.
+    if reverse:
+        items_list = [item for item in items_list
+                      if not _word_matches_alternatives(item['word'], item['alternatives'])]
+        if not items_list:
+            return None
 
     item = random.choice(items_list)
     return {
@@ -377,6 +392,11 @@ def get_multi_word_challenge(category: str, reverse: bool = False, language: str
         items_list = get_multi_word_number_items(language)
     else:
         items_list = get_category_items_with_english(category, language)
+
+    # In reverse mode, exclude items where the word equals its English alternatives
+    if reverse:
+        items_list = [item for item in items_list
+                      if not _word_matches_alternatives(item['word'], item['alternatives'])]
 
     if not items_list or len(items_list) < 4:
         return None

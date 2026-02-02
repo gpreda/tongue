@@ -953,10 +953,14 @@ async function handleHint() {
             hintWords.push(hint.verb[0]);  // Track hint word
         }
         if (validHint(hint.adjective)) {
-            hintHtml += `Adjective: <em>${hint.adjective[0]}</em> = ${hint.adjective[1]}`;
+            hintHtml += `Adjective: <em>${hint.adjective[0]}</em> = ${hint.adjective[1]}<br>`;
             hintWords.push(hint.adjective[0]);  // Track hint word
         }
-        if (!validHint(hint.noun) && !validHint(hint.verb) && !validHint(hint.adjective)) {
+        if (validHint(hint.adverb)) {
+            hintHtml += `Adverb: <em>${hint.adverb[0]}</em> = ${hint.adverb[1]}`;
+            hintWords.push(hint.adverb[0]);  // Track hint word
+        }
+        if (!validHint(hint.noun) && !validHint(hint.verb) && !validHint(hint.adjective) && !validHint(hint.adverb)) {
             hintHtml = 'No hint available';
         }
 

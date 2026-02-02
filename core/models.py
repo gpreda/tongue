@@ -480,6 +480,10 @@ class History:
                 word = ' '.join(str(w) for w in word)
             if isinstance(english, list):
                 english = ', '.join(str(e) for e in english)
+            # Skip entries where word == english (AI returned same value for both,
+            # so we can't determine the correct translation)
+            if word and english and word.lower().strip() == english.lower().strip():
+                continue
             part_of_speech = (v_breakdown[2] or 'unknown').lower()
             was_correct = v_breakdown[3]
 
@@ -632,6 +636,14 @@ class History:
         """Check if a word is a proper noun (personal name, place, etc.)."""
         return word[0].isupper() if word else False
 
+    def _has_valid_translation(self, word: str) -> bool:
+        """Check if a word has a valid (non-empty, non-self) translation."""
+        info = self.words.get(word, {})
+        trans = info.get('translation') or ''
+        if isinstance(trans, list):
+            trans = ', '.join(str(t) for t in trans)
+        return bool(trans) and trans.lower().strip() != word.lower().strip()
+
     def get_challenge_word(self) -> dict | None:
         """Get a word for word challenge. Picks from low success rate words.
         Excludes proper nouns (personal names).
@@ -643,6 +655,13 @@ class History:
                 continue
             # Skip words already passed in a challenge (unless missed later)
             if info.get('challenge_passed'):
+                continue
+            # Skip words with missing or invalid translations (translation equals
+            # the word itself, which means the AI stored it incorrectly)
+            trans = info.get('translation') or ''
+            if isinstance(trans, list):
+                trans = ', '.join(str(t) for t in trans)
+            if not trans or trans.lower().strip() == word.lower().strip():
                 continue
             total = info['correct_count'] + info['incorrect_count']
             if total > 0:
@@ -658,7 +677,8 @@ class History:
         if not candidates:
             # Fall back to any non-proper-noun word if no low success rate words
             eligible = [w for w in self.words.keys()
-                        if not self._is_proper_noun(w) and not self.words[w].get('challenge_passed')]
+                        if not self._is_proper_noun(w) and not self.words[w].get('challenge_passed')
+                        and self._has_valid_translation(w)]
             if not eligible:
                 return None
             word = random.choice(eligible)

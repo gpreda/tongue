@@ -259,6 +259,10 @@ class GeminiProvider(AIProvider):
                - Using articles (a/an/the) flexibly
                - Capitalization differences (e.g., "monday" instead of "Monday", or not capitalizing the first word)
                - Missing or different punctuation (periods, commas, exclamation marks)
+               - Missing accents/diacritics in the {target_language} translation when it does not change
+                 the meaning of the word (e.g., "tambien" for "también", "cafe" for "café",
+                 "facil" for "fácil" are all acceptable). Only penalize missing accents when
+                 they change the word's meaning (e.g., "el" vs "él", "tu" vs "tú", "si" vs "sí").
                - Reflexive pronouns (se, me, te) that are naturally absorbed into English phrasal verbs
                  (e.g., "se pone" → "puts on" is correct, don't require "himself/herself")
                - Grammar elements that have no direct equivalent when the meaning is preserved
@@ -377,7 +381,8 @@ class GeminiProvider(AIProvider):
             partial_section = f"""
             The student's current partial translation: "{partial_translation}"
             Analyze which words the student has already correctly translated in their partial attempt.
-            Do NOT hint at words they have already correctly translated — focus only on words they are still missing or got wrong.
+            Do NOT hint at words they have already correctly translated — focus ONLY on words they are still missing or got wrong.
+            IMPORTANT: You MUST provide hints for any missing/untranslated words regardless of how common they are. Even simple words like "too", "also", "very", "well" etc. should be hinted if they are missing from the partial translation.
 """
 
         if direction == 'reverse':
@@ -389,19 +394,21 @@ class GeminiProvider(AIProvider):
 
             Already known words (do NOT include these): {', '.join(correct_words[-50:]) if correct_words else 'none'}
             {partial_section}
-            Find the most challenging/uncommon noun, verb, and adjective from the sentence.
-            Prioritize less common vocabulary that a student would most likely need help with.
+            Find a noun, verb, adjective, and adverb from the sentence that the student needs help with.
+            If a partial translation is provided, prioritize words that are still missing from the translation.
+            Otherwise, prioritize less common vocabulary that a student would most likely need help with.
             Provide their {lang_name} translations.
 
             Respond with ONLY a Python dictionary in this exact format:
             {{
                 'noun': ['english_noun', '{lang_name.lower()}_translation'],
                 'verb': ['english_verb', '{lang_name.lower()}_translation'],
-                'adjective': ['english_adjective', '{lang_name.lower()}_translation']
+                'adjective': ['english_adjective', '{lang_name.lower()}_translation'],
+                'adverb': ['english_adverb', '{lang_name.lower()}_translation']
             }}
 
             If any part of speech is not available (all are known or not present), use null for that entry:
-            {{'noun': null, 'verb': ['english_verb', '{lang_name.lower()}_translation'], 'adjective': null}}
+            {{'noun': null, 'verb': ['english_verb', '{lang_name.lower()}_translation'], 'adjective': null, 'adverb': null}}
 
             Return ONLY the dictionary, no other text.
         """
@@ -413,19 +420,21 @@ class GeminiProvider(AIProvider):
 
             Already known words (do NOT include these): {', '.join(correct_words[-50:]) if correct_words else 'none'}
             {partial_section}
-            Find the most challenging/uncommon noun, verb, and adjective from the sentence.
-            Prioritize less common vocabulary that a student would most likely need help with.
+            Find a noun, verb, adjective, and adverb from the sentence that the student needs help with.
+            If a partial translation is provided, prioritize words that are still missing from the translation.
+            Otherwise, prioritize less common vocabulary that a student would most likely need help with.
             Provide their English translations.
 
             Respond with ONLY a Python dictionary in this exact format:
             {{
                 'noun': ['{lang_name.lower()}_noun', 'english_translation'],
                 'verb': ['{lang_name.lower()}_verb', 'english_translation'],
-                'adjective': ['{lang_name.lower()}_adjective', 'english_translation']
+                'adjective': ['{lang_name.lower()}_adjective', 'english_translation'],
+                'adverb': ['{lang_name.lower()}_adverb', 'english_translation']
             }}
 
             If any part of speech is not available (all are known or not present), use null for that entry:
-            {{'noun': null, 'verb': ['{lang_name.lower()}_verb', 'english_translation'], 'adjective': null}}
+            {{'noun': null, 'verb': ['{lang_name.lower()}_verb', 'english_translation'], 'adjective': null, 'adverb': null}}
 
             Return ONLY the dictionary, no other text.
         """

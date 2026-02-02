@@ -189,6 +189,7 @@ class HintResponse(BaseModel):
     noun: Optional[list]
     verb: Optional[list]
     adjective: Optional[list]
+    adverb: Optional[list]
 
 
 class VerbHintRequest(BaseModel):
@@ -1367,7 +1368,7 @@ async def submit_translation(request: TranslationRequest):
                 'evaluation': evaluation,
                 'translation_correct': translation_correct,
                 'tense_correct': tense_correct,
-                'vocabulary_breakdown': [[conjugated_form, english_translation, 'verb', translation_correct]]
+                'vocabulary_breakdown': [[english_translation, conjugated_form, 'verb', translation_correct]] if history.direction == 'reverse' else [[conjugated_form, english_translation, 'verb', translation_correct]]
             }
             judge_ms = 0
 
@@ -1506,7 +1507,7 @@ async def submit_translation(request: TranslationRequest):
                 'score': score,
                 'correct_translation': correct_display,
                 'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_display}',
-                'vocabulary_breakdown': [[spanish_word, alternatives, category, is_correct]]
+                'vocabulary_breakdown': [[alternatives, spanish_word, category, is_correct]] if is_reverse else [[spanish_word, alternatives, category, is_correct]]
             }
             judge_ms = 0
 
@@ -1590,7 +1591,7 @@ async def submit_translation(request: TranslationRequest):
                 'score': score,
                 'correct_translation': correct_translation,
                 'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_translation}',
-                'vocabulary_breakdown': [[word, correct_translation, word_type, is_correct]]
+                'vocabulary_breakdown': [[word_info.get('translation', ''), word, word_type, is_correct]] if history.direction == 'reverse' else [[word, correct_translation, word_type, is_correct]]
             }
             judge_ms = 0
 
@@ -1768,14 +1769,14 @@ async def _get_hint_inner(request: HintRequest):
                 and entry[1] is not None and entry[1] != 'null')
 
     if hint:
-        for key in ('noun', 'verb', 'adjective'):
+        for key in ('noun', 'verb', 'adjective', 'adverb'):
             if key in hint and not valid_entry(hint.get(key)):
                 hint[key] = None
 
     # Log hint request
     words_revealed = []
     if hint:
-        for key in ('noun', 'verb', 'adjective'):
+        for key in ('noun', 'verb', 'adjective', 'adverb'):
             if hint.get(key):
                 words_revealed.append(hint[key][0])
     hint_ai = ai_provider.get_last_call_info()
@@ -1790,12 +1791,13 @@ async def _get_hint_inner(request: HintRequest):
               model_ms=hint_ai.get('model_ms'))
 
     if not hint:
-        return HintResponse(noun=None, verb=None, adjective=None)
+        return HintResponse(noun=None, verb=None, adjective=None, adverb=None)
 
     return HintResponse(
         noun=hint.get('noun'),
         verb=hint.get('verb'),
-        adjective=hint.get('adjective')
+        adjective=hint.get('adjective'),
+        adverb=hint.get('adverb')
     )
 
 
