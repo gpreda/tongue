@@ -79,6 +79,7 @@ const elements = {
     prevScore: document.getElementById('prev-score'),
     prevReason: document.getElementById('prev-reason'),
     prevReasonRow: document.getElementById('prev-reason-row'),
+    prevEventId: document.getElementById('prev-event-id'),
 
     loading: document.getElementById('loading'),
     currentTask: document.getElementById('current-task'),
@@ -363,7 +364,7 @@ function updateStatusBar(status) {
     const prefix = dir === 'reverse' ? 'R' : 'L';
     elements.levelDisplay.textContent = `${langPrefix}${prefix}${status.difficulty}`;
     elements.progressDisplay.textContent = `${status.good_score_count}/7`;
-    elements.challengeDisplay.textContent = status.challenge_stats_display || '0/0';
+    elements.challengeDisplay.textContent = status.challenge_stats_display || '0%';
     elements.completedDisplay.textContent = `${status.total_completed}`;
     elements.practiceTimeDisplay.textContent = status.practice_time_display || '0s';
     elements.switchDirectionBtn.textContent = dir === 'reverse' ? 'Switch to Normal' : 'Switch to Reverse';
@@ -472,6 +473,14 @@ function showPreviousEvaluation(eval_data) {
         elements.prevReason.textContent = eval_data.evaluation;
     } else {
         elements.prevReasonRow.classList.add('hidden');
+    }
+
+    // Show event ID for debugging reference
+    if (eval_data.event_id) {
+        elements.prevEventId.textContent = `Event #${eval_data.event_id}`;
+        elements.prevEventId.classList.remove('hidden');
+    } else {
+        elements.prevEventId.classList.add('hidden');
     }
 }
 

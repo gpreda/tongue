@@ -234,7 +234,7 @@ class StatusResponse(BaseModel):
     story_sentences_remaining: int
     progress_display: str
     challenge_stats: dict  # {word: {correct, incorrect}, vocab: {...}, verb: {...}}
-    challenge_stats_display: str  # "12/15" format
+    challenge_stats_display: str  # "80%" format
     practice_time_seconds: int
     practice_time_display: str  # Human-readable format like "2h 15m"
     practice_times: dict = {}  # Per language+direction breakdown, e.g. {"es:normal": 1380}

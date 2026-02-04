@@ -854,12 +854,13 @@ class History:
             self.challenge_stats[challenge_type]['incorrect'] += 1
 
     def get_challenge_stats_display(self) -> str:
-        """Get a display string for challenge stats."""
+        """Get a display string for challenge stats as a success percentage."""
         total_correct = sum(s['correct'] for s in self.challenge_stats.values())
         total_attempts = total_correct + sum(s['incorrect'] for s in self.challenge_stats.values())
         if total_attempts == 0:
-            return "0/0"
-        return f"{total_correct}/{total_attempts}"
+            return "0%"
+        pct = round(total_correct / total_attempts * 100)
+        return f"{pct}%"
 
     def record_practice_time(self, delta_seconds: float) -> bool:
         """Record practice time if within threshold. Returns True if recorded."""
