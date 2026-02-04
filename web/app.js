@@ -13,6 +13,7 @@ let isWordChallenge = false;  // Track if current task is a word challenge
 let isVocabChallenge = false;  // Track if current task is a vocab challenge
 let isVerbChallenge = false;  // Track if current task is a verb challenge
 let isSynonymChallenge = false; // Track if current task is a synonym/antonym challenge
+let isWeakwordsChallenge = false; // Track if current task is a weakest words challenge
 let isMultiVocab = false;     // Track if current task is a multi-word vocab challenge
 let isReverseVocab = false;   // Track if current task is reverse direction
 let multiVocabWords = [];     // Array of {word, translation} for multi-word challenges
@@ -100,6 +101,7 @@ const elements = {
     synonymChallengeNotice: document.getElementById('synonym-challenge-notice'),
     synonymChallengeLabel: document.getElementById('synonym-challenge-label'),
     synonymWordType: document.getElementById('synonym-word-type'),
+    weakwordsChallengeNotice: document.getElementById('weakwords-challenge-notice'),
     tenseSelectRow: document.getElementById('tense-select-row'),
     tenseSelect: document.getElementById('tense-select'),
     taskPrompt: document.getElementById('task-prompt'),
@@ -439,7 +441,8 @@ function showPreviousEvaluation(eval_data) {
             'word': 'Word Challenge',
             'vocab': 'Vocabulary Quiz',
             'verb': 'Verb Challenge',
-            'synonym': 'Synonym/Antonym Challenge'
+            'synonym': 'Synonym/Antonym Challenge',
+            'weakwords': 'Weakest Words'
         };
         let label = challengeLabels[eval_data.challenge_type] || '';
         if (eval_data.challenge_direction) {
@@ -484,7 +487,7 @@ function showPreviousEvaluation(eval_data) {
     }
 }
 
-function showCurrentTask(sentence, isReview = false, isWordChal = false, challengeWord = null, isVocabChal = false, vocabChallenge = null, isVerbChal = false, verbChallenge = null, isSynChal = false, synChallenge = null) {
+function showCurrentTask(sentence, isReview = false, isWordChal = false, challengeWord = null, isVocabChal = false, vocabChallenge = null, isVerbChal = false, verbChallenge = null, isSynChal = false, synChallenge = null, isWeakChal = false, weakChallenge = null) {
     elements.loading.classList.add('hidden');
     elements.currentTask.classList.remove('hidden');
     elements.validationResult.classList.add('hidden');
@@ -497,11 +500,18 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
     // Reset multi-word state
     isMultiVocab = false;
     isReverseVocab = false;
+    isWeakwordsChallenge = false;
     multiVocabWords = [];
     elements.multiVocabInputs.classList.add('hidden');
     elements.translationInput.classList.remove('hidden');
     elements.currentSentence.classList.remove('hidden');
     elements.vocabDirection.textContent = '';
+    // Hide extra cards (5 and 6) by default, reset grid class
+    const card4 = document.getElementById('multi-card-4');
+    const card5 = document.getElementById('multi-card-5');
+    if (card4) card4.classList.add('hidden');
+    if (card5) card5.classList.add('hidden');
+    elements.multiVocabInputs.classList.remove('weak6-grid');
 
     // Show review notice if this is a review sentence
     if (isReview) {
@@ -515,12 +525,53 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
     elements.vocabChallengeNotice.classList.add('hidden');
     elements.verbChallengeNotice.classList.add('hidden');
     elements.synonymChallengeNotice.classList.add('hidden');
+    elements.weakwordsChallengeNotice.classList.add('hidden');
     elements.tenseSelectRow.classList.add('hidden');
     elements.tenseSelect.value = '';
     elements.currentSentence.classList.remove('word-challenge');
 
     // Show appropriate challenge notice
-    if (isSynChal && synChallenge) {
+    if (isWeakChal && weakChallenge) {
+        // Weakest words challenge (6 words)
+        isWeakwordsChallenge = true;
+        isMultiVocab = true;  // Reuse multi-vocab submission logic
+        multiVocabWords = weakChallenge.words;
+
+        elements.weakwordsChallengeNotice.classList.remove('hidden');
+        const langCode = currentLanguageCode.toUpperCase();
+        elements.taskPrompt.textContent = currentDirection === 'reverse'
+            ? `Type the ${currentLanguageName} word for each:`
+            : 'Translate each word:';
+        elements.currentSentence.classList.add('hidden');
+        elements.translationInput.classList.add('hidden');
+        elements.hintBtn.classList.add('hidden');
+
+        // Show multi-word inputs (6 cards) with 3-column grid
+        elements.multiVocabInputs.classList.remove('hidden');
+        elements.multiVocabInputs.classList.add('weak6-grid');
+        const card4el = document.getElementById('multi-card-4');
+        const card5el = document.getElementById('multi-card-5');
+        if (card4el) card4el.classList.remove('hidden');
+        if (card5el) card5el.classList.remove('hidden');
+
+        for (let i = 0; i < 6; i++) {
+            const wordEl = document.getElementById(`multi-word-${i}`);
+            const inputEl = document.getElementById(`multi-input-${i}`);
+            const resultEl = document.getElementById(`multi-result-${i}`);
+
+            if (i < multiVocabWords.length && wordEl && inputEl && resultEl) {
+                const item = multiVocabWords[i];
+                // Normal: show target word, expect English
+                // Reverse: show English translation, expect target word
+                wordEl.textContent = currentDirection === 'reverse' ? item.translation : item.word;
+                inputEl.value = '';
+                inputEl.placeholder = currentDirection === 'reverse' ? `Translate to ${currentLanguageName}` : 'Translate to English';
+                resultEl.textContent = '';
+            }
+        }
+        // Focus first input
+        document.getElementById('multi-input-0').focus();
+    } else if (isSynChal && synChallenge) {
         const isSynonym = synChallenge.challenge_type === 'SYN';
         const typeLabel = isSynonym ? 'Synonym' : 'Antonym';
         elements.synonymChallengeNotice.classList.remove('hidden');
@@ -823,6 +874,7 @@ async function loadNextSentence() {
         isVocabChallenge = data.is_vocab_challenge;
         isVerbChallenge = data.is_verb_challenge;
         isSynonymChallenge = data.is_synonym_challenge || false;
+        isWeakwordsChallenge = data.is_weakwords_challenge || false;
         currentDirection = data.direction || 'normal';
 
         // Update status bar
@@ -830,7 +882,7 @@ async function loadNextSentence() {
         updateStatusBar(status);
 
         // Render story (hide for challenges or when no story)
-        if (data.is_word_challenge || data.is_vocab_challenge || data.is_verb_challenge || data.is_synonym_challenge || !data.story) {
+        if (data.is_word_challenge || data.is_vocab_challenge || data.is_verb_challenge || data.is_synonym_challenge || data.is_weakwords_challenge || !data.story) {
             elements.storySection.classList.add('hidden');
         } else {
             renderStory(data.story, data.difficulty, data.sentence);
@@ -844,7 +896,7 @@ async function loadNextSentence() {
         }
 
         // Show current task
-        showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word, data.is_vocab_challenge, data.vocab_challenge, data.is_verb_challenge, data.verb_challenge, data.is_synonym_challenge, data.synonym_challenge);
+        showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word, data.is_vocab_challenge, data.vocab_challenge, data.is_verb_challenge, data.verb_challenge, data.is_synonym_challenge, data.synonym_challenge, data.is_weakwords_challenge, data.weakwords_challenge);
 
         // Update API stats
         updateApiStats();
@@ -862,8 +914,9 @@ async function handleSubmit(e) {
     let translations = [];
 
     if (isMultiVocab) {
-        // Collect all 4 inputs
-        for (let i = 0; i < 4; i++) {
+        // Collect all inputs (6 for weakwords, 4 for vocab)
+        const inputCount = isWeakwordsChallenge ? 6 : 4;
+        for (let i = 0; i < inputCount; i++) {
             const input = document.getElementById(`multi-input-${i}`);
             translations.push(input ? input.value.trim() : '');
         }
@@ -1198,14 +1251,15 @@ elements.switchLanguageBtn.addEventListener('click', () => { closeMenu(); handle
 elements.downgradeBtn.addEventListener('click', () => { closeMenu(); handleDowngrade(); });
 elements.newGameBtn.addEventListener('click', () => { closeMenu(); handleNewGame(); });
 
-// Enter-key navigation for multi-word inputs
-for (let i = 0; i < 4; i++) {
+// Enter-key navigation for multi-word inputs (6 cards for weakwords, 4 for vocab)
+for (let i = 0; i < 6; i++) {
     const input = document.getElementById(`multi-input-${i}`);
     if (input) {
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                if (i < 3) {
+                const maxIndex = isWeakwordsChallenge ? 5 : 3;
+                if (i < maxIndex) {
                     // Move to next input
                     document.getElementById(`multi-input-${i + 1}`).focus();
                 } else {

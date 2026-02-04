@@ -309,6 +309,13 @@ header h1 {
     vertical-align: middle;
 }
 
+.prev-event-id {
+    font-size: 0.7rem;
+    color: #888;
+    text-align: right;
+    margin-top: 4px;
+}
+
 /* Score colors for previous evaluation */
 .score-excellent {
     color: #2ecc71;
@@ -461,6 +468,10 @@ header h1 {
     grid-template-columns: repeat(4, 1fr);
     gap: 12px;
     margin-bottom: 15px;
+}
+
+.multi-vocab-inputs.weak6-grid {
+    grid-template-columns: repeat(3, 1fr);
 }
 
 .multi-vocab-card {
@@ -1130,5 +1141,9 @@ header h1 {
     .multi-vocab-inputs {
         grid-template-columns: repeat(2, 1fr);
         gap: 10px;
+    }
+
+    .multi-vocab-inputs.weak6-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
 }

@@ -83,6 +83,9 @@
                     <span class="challenge-label" id="synonym-challenge-label">Synonym Challenge!</span>
                     <span id="synonym-word-type" class="synonym-word-type"></span>
                 </div>
+                <div id="weakwords-challenge-notice" class="word-challenge-notice hidden">
+                    <span class="challenge-label">Weakest Words!</span>
+                </div>
                 <h3 id="task-prompt">Translate this sentence:</h3>
                 <p id="current-sentence" class="current-sentence"></p>
                 <form id="translation-form">
@@ -107,6 +110,16 @@
                             <span class="multi-vocab-word" id="multi-word-3"></span>
                             <input type="text" class="multi-vocab-input" id="multi-input-3" autocomplete="off">
                             <span class="multi-vocab-result" id="multi-result-3"></span>
+                        </div>
+                        <div class="multi-vocab-card hidden" id="multi-card-4">
+                            <span class="multi-vocab-word" id="multi-word-4"></span>
+                            <input type="text" class="multi-vocab-input" id="multi-input-4" autocomplete="off">
+                            <span class="multi-vocab-result" id="multi-result-4"></span>
+                        </div>
+                        <div class="multi-vocab-card hidden" id="multi-card-5">
+                            <span class="multi-vocab-word" id="multi-word-5"></span>
+                            <input type="text" class="multi-vocab-input" id="multi-input-5" autocomplete="off">
+                            <span class="multi-vocab-result" id="multi-result-5"></span>
                         </div>
                     </div>
                     <div id="tense-select-row" class="tense-select-row hidden">
@@ -146,6 +159,7 @@
                 <p><strong>Correct:</strong> <span id="prev-correct"></span></p>
                 <p><strong>Score:</strong> <span id="prev-score"></span></p>
                 <p id="prev-reason-row"><strong>Feedback:</strong> <span id="prev-reason"></span></p>
+                <p id="prev-event-id" class="prev-event-id hidden"></p>
             </div>
         </div>
 

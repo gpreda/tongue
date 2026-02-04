@@ -76,7 +76,8 @@ class History:
             'word': {'correct': 0, 'incorrect': 0},
             'vocab': {'correct': 0, 'incorrect': 0},
             'verb': {'correct': 0, 'incorrect': 0},
-            'synonym': {'correct': 0, 'incorrect': 0}
+            'synonym': {'correct': 0, 'incorrect': 0},
+            'weakwords': {'correct': 0, 'incorrect': 0}
         }
         # Practice time tracking per language+direction key, e.g. {"es:normal": 120.5}
         self.practice_times = {}
@@ -262,7 +263,8 @@ class History:
             'word': {'correct': 0, 'incorrect': 0},
             'vocab': {'correct': 0, 'incorrect': 0},
             'verb': {'correct': 0, 'incorrect': 0},
-            'synonym': {'correct': 0, 'incorrect': 0}
+            'synonym': {'correct': 0, 'incorrect': 0},
+            'weakwords': {'correct': 0, 'incorrect': 0}
         })
         last_eval = data.get('last_evaluated_round')
         history.last_evaluated_round = TongueRound.from_dict(last_eval) if last_eval else None
@@ -439,7 +441,7 @@ class History:
                 if (sentence.startswith('WORD:') or sentence.startswith('VOCAB:') or
                         sentence.startswith('VOCAB4:') or sentence.startswith('VOCAB4R:') or
                         sentence.startswith('VERB:') or sentence.startswith('SYN:') or
-                        sentence.startswith('ANT:')):
+                        sentence.startswith('ANT:') or sentence.startswith('WEAK6:')):
                     self.review_queue.pop(i)
                     continue
                 # Remove from queue and return this sentence
@@ -578,7 +580,8 @@ class History:
                         round.sentence.startswith('VOCAB4R:') or
                         round.sentence.startswith('VERB:') or
                         round.sentence.startswith('SYN:') or
-                        round.sentence.startswith('ANT:'))
+                        round.sentence.startswith('ANT:') or
+                        round.sentence.startswith('WEAK6:'))
         if score <= 50 and not is_challenge:
             # Check if sentence is not already in review queue
             existing = [r['sentence'] for r in self.review_queue]
@@ -681,6 +684,9 @@ class History:
             )
             if has_eligible:
                 weights['synonym'] = self._challenge_weight('synonym')
+        # weakwords: need >= 6 words with valid translations (non-proper-noun)
+        if self.get_weakest_words(6) is not None:
+            weights['weakwords'] = self._challenge_weight('weakwords')
         return weights
 
     def _challenge_weight(self, category: str) -> float:
@@ -695,7 +701,7 @@ class History:
 
     def pick_challenge_type(self) -> str | None:
         """Decide whether this turn is a challenge and which category.
-        Returns category name ('word', 'vocab', 'verb', 'synonym') or None."""
+        Returns category name ('word', 'vocab', 'verb', 'synonym', 'weakwords') or None."""
         if not self.is_challenge_turn():
             return None
         weights = self.get_challenge_category_weights()
@@ -827,6 +833,44 @@ class History:
         if not candidates:
             return None
         return random.choice(candidates)
+
+    def get_weakest_words(self, count: int = 6) -> list[dict] | None:
+        """Get words with the lowest success rate from user's word history.
+        Excludes proper nouns and words without valid translations.
+        Returns list of {word, type, translation} or None if fewer than count eligible."""
+        candidates = []
+        for word, info in self.words.items():
+            if self._is_proper_noun(word):
+                continue
+            if not self._has_valid_translation(word):
+                continue
+            total = info['correct_count'] + info['incorrect_count']
+            if total == 0:
+                success_rate = 0.0
+            else:
+                success_rate = info['correct_count'] / total
+            trans = info.get('translation', '')
+            if isinstance(trans, list):
+                trans = ', '.join(str(t) for t in trans)
+            candidates.append({
+                'word': word,
+                'type': info.get('type') or 'unknown',
+                'translation': trans,
+                'success_rate': success_rate,
+                'total': total
+            })
+
+        if len(candidates) < count:
+            return None
+
+        # Sort by success rate ascending (weakest first), then by total descending (more practiced = more confident about weakness)
+        candidates.sort(key=lambda c: (c['success_rate'], -c['total']))
+        result = candidates[:count]
+        # Remove internal keys before returning
+        for item in result:
+            del item['success_rate']
+            del item['total']
+        return result
 
     def get_verb_for_challenge(self) -> str | None:
         """Get a verb from user's word history for verb challenge.

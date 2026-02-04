@@ -257,6 +257,8 @@ class NextSentenceResponse(BaseModel):
     verb_challenge: Optional[dict] = None  # {conjugated_form, base_verb, tense, translation, person}
     is_synonym_challenge: bool = False
     synonym_challenge: Optional[dict] = None  # {word, challenge_type (SYN/ANT), type}
+    is_weakwords_challenge: bool = False
+    weakwords_challenge: Optional[dict] = None  # {words: [{word, type, translation}]}
     has_previous_evaluation: bool
     previous_evaluation: Optional[dict]
     direction: str = 'normal'
@@ -768,10 +770,12 @@ async def _get_next_sentence_inner(user_id: str = "default"):
     is_vocab_challenge = False
     is_verb_challenge = False
     is_synonym_challenge = False
+    is_weakwords_challenge = False
     challenge_word = None
     vocab_challenge = None
     verb_challenge = None
     synonym_challenge = None
+    weakwords_challenge = None
 
     if history.rounds:
         last_round = history.rounds[-1]
@@ -866,6 +870,23 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                     'challenge_type': challenge_type,
                     'type': word_info.get('type', 'unknown')
                 }
+            # Check if this was a weakest words challenge
+            elif last_round.sentence.startswith("WEAK6:"):
+                is_weakwords_challenge = True
+                words_str = last_round.sentence[6:]  # Remove "WEAK6:" prefix
+                word_keys = words_str.split(",")
+                words = []
+                for wk in word_keys:
+                    info = history.words.get(wk, {})
+                    trans = info.get('translation', '')
+                    if isinstance(trans, list):
+                        trans = ', '.join(str(t) for t in trans)
+                    words.append({
+                        'word': wk,
+                        'type': info.get('type', 'unknown'),
+                        'translation': trans
+                    })
+                weakwords_challenge = {'words': words}
             else:
                 # Not a challenge - check if it's a review sentence (generate_ms=0)
                 is_review = last_round.generate_ms == 0
@@ -942,6 +963,17 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                         current_round = TongueRound(f"{challenge_type}:{syn_word}", history.difficulty, 0)
                         history.rounds.append(current_round)
                         save_history(user_id)
+
+        if selected_challenge == 'weakwords' and current_round is None:
+            weak_words = history.get_weakest_words(6)
+            if weak_words:
+                is_weakwords_challenge = True
+                weakwords_challenge = {'words': weak_words}
+                words_str = ','.join(w['word'] for w in weak_words)
+                from core.models import TongueRound
+                current_round = TongueRound(f"WEAK6:{words_str}", history.difficulty, 0)
+                history.rounds.append(current_round)
+                save_history(user_id)
 
         if selected_challenge == 'vocab' and current_round is None:
             vocab_challenge = history.get_vocab_challenge()
@@ -1088,6 +1120,21 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         elif prev_sentence.startswith("SYN:") or prev_sentence.startswith("ANT:"):
             prev_challenge_type = 'synonym'
             prev_sentence = prev_sentence[4:]  # Remove SYN: or ANT: prefix
+        elif prev_sentence.startswith("WEAK6:"):
+            prev_challenge_type = 'weakwords'
+            word_keys = prev_sentence[6:].split(",")
+            if history.direction == 'reverse':
+                # Reverse mode: user saw English translations
+                display_words = []
+                for wk in word_keys:
+                    info = history.words.get(wk, {})
+                    trans = info.get('translation', wk)
+                    if isinstance(trans, list):
+                        trans = ', '.join(str(t) for t in trans)
+                    display_words.append(trans if trans else wk)
+                prev_sentence = ', '.join(display_words)
+            else:
+                prev_sentence = ', '.join(word_keys)
 
         # Determine challenge direction for display
         prev_challenge_direction = None
@@ -1101,7 +1148,7 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 is_rev = prev.sentence.startswith("VOCABR:") or prev.sentence.startswith("VOCAB4R:")
                 prev_challenge_direction = f"EN → {lang_upper}" if is_rev else f"{lang_upper} → EN"
             else:
-                # Word and verb challenges use the session direction
+                # Word, verb, and weakwords challenges use the session direction
                 is_rev = history.direction == 'reverse'
                 prev_challenge_direction = f"EN → {lang_upper}" if is_rev else f"{lang_upper} → EN"
 
@@ -1170,6 +1217,10 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             sentence = verb_challenge.get('translation', sentence)
     elif is_synonym_challenge and (sentence.startswith("SYN:") or sentence.startswith("ANT:")):
         sentence = sentence[4:]  # Remove SYN: or ANT: prefix for display
+    elif is_weakwords_challenge and sentence.startswith("WEAK6:"):
+        # Multi-word: the weakwords_challenge dict has words
+        # sentence field isn't displayed for multi-word (UI hides it)
+        sentence = sentence[6:]  # Remove WEAK6: prefix
 
     # Record when this sentence/challenge was served for practice time tracking
     record_served_time(user_id)
@@ -1199,6 +1250,11 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                   word=sentence,
                   tense=verb_challenge.get('tense') if verb_challenge else None,
                   ms=ms)
+    elif is_weakwords_challenge:
+        log_event('challenge.served', user_id,
+                  challenge_type='weakwords',
+                  word=sentence,
+                  ms=ms)
     else:
         log_event('sentence.served', user_id,
                   sentence=sentence,
@@ -1221,6 +1277,8 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         verb_challenge=verb_challenge,
         is_synonym_challenge=is_synonym_challenge,
         synonym_challenge=synonym_challenge,
+        is_weakwords_challenge=is_weakwords_challenge,
+        weakwords_challenge=weakwords_challenge,
         has_previous_evaluation=has_previous,
         previous_evaluation=previous_eval,
         direction=history.direction
@@ -1259,13 +1317,14 @@ async def submit_translation(request: TranslationRequest):
         is_verb_challenge = current_round.sentence.startswith("VERB:")
         is_synonym_challenge = (current_round.sentence.startswith("SYN:") or
                                 current_round.sentence.startswith("ANT:"))
+        is_weakwords_challenge = current_round.sentence.startswith("WEAK6:")
 
         # Calculate and record practice time
         practice_delta = get_practice_delta(request.user_id)
         if practice_delta is not None:
             practice_recorded = history.record_practice_time(practice_delta)
             # Log practice time event
-            challenge_type_str = 'verb' if is_verb_challenge else ('synonym' if is_synonym_challenge else ('vocab' if is_vocab_challenge else ('word' if is_word_challenge else 'sentence')))
+            challenge_type_str = 'weakwords' if is_weakwords_challenge else ('verb' if is_verb_challenge else ('synonym' if is_synonym_challenge else ('vocab' if is_vocab_challenge else ('word' if is_word_challenge else 'sentence'))))
             log_event('practice_time.delta', request.user_id,
                       delta_seconds=round(practice_delta, 2),
                       task_type=challenge_type_str,
@@ -1403,6 +1462,92 @@ async def submit_translation(request: TranslationRequest):
             expected_sentence = english_translation if history.direction == 'reverse' else conjugated_form
             if expected_sentence != request.sentence:
                 logger.warning(f"Verb sentence mismatch: expected={expected_sentence!r}, got={request.sentence!r}, direction={history.direction}")
+
+        elif is_weakwords_challenge:
+            # Weakest words challenge (6 words from user's word history)
+            words_str = current_round.sentence[6:]  # Remove "WEAK6:" prefix
+            word_keys = words_str.split(",")
+            logger.info(f"Weakwords challenge: words={word_keys}, direction={history.direction}")
+
+            word_results = []
+            total_correct = 0
+            translations = request.translations or []
+
+            def normalize_word(w: str) -> str:
+                """Normalize word for comparison (handle common plural/singular forms)."""
+                w = w.strip()
+                if w.endswith('ies'):
+                    return w[:-3] + 'y'
+                if w.endswith('es'):
+                    return w[:-2]
+                if w.endswith('s') and len(w) > 2:
+                    return w[:-1]
+                return w
+
+            for i, wk in enumerate(word_keys):
+                student_answer = translations[i].strip() if i < len(translations) else ''
+                word_info = history.words.get(wk, {})
+                trans = word_info.get('translation', '')
+                if isinstance(trans, list):
+                    trans = ', '.join(str(t) for t in trans)
+
+                if history.direction == 'reverse':
+                    # Reverse: English shown, user types target-language word
+                    is_correct = student_answer.lower() == wk.lower()
+                    if not is_correct:
+                        is_correct = accent_lenient_match(student_answer, wk, target_is_spanish=True, accent_words=accent_set)
+                    word_results.append({
+                        'word': trans,  # English shown
+                        'correct_answer': wk,  # Target word expected
+                        'student_answer': student_answer,
+                        'is_correct': is_correct
+                    })
+                else:
+                    # Normal: target word shown, user types English
+                    correct_answers = [t.strip().lower() for t in trans.split(',')]
+                    is_correct = student_answer.lower() in correct_answers
+                    if not is_correct:
+                        normalized_student = normalize_word(student_answer.lower())
+                        normalized_correct = {normalize_word(a) for a in correct_answers}
+                        is_correct = normalized_student in normalized_correct or student_answer.lower() in normalized_correct
+                    if not is_correct:
+                        is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=False, accent_words=accent_set) for a in correct_answers)
+                    word_results.append({
+                        'word': wk,  # Target word shown
+                        'correct_answer': trans,
+                        'student_answer': student_answer,
+                        'is_correct': is_correct
+                    })
+
+                if is_correct:
+                    total_correct += 1
+
+            score = round(total_correct / 6 * 100)
+            all_correct = total_correct == 6
+            correct_str = ', '.join(f"{w['word']}={w['correct_answer']}" for w in word_results if not w['is_correct'])
+            evaluation = 'All correct!' if all_correct else f'Incorrect: {correct_str}'
+
+            vocab_breakdown = []
+            correct_parts = []
+            for i, wk in enumerate(word_keys):
+                wi = history.words.get(wk, {})
+                t = wi.get('translation', '')
+                if isinstance(t, list):
+                    t = ', '.join(str(x) for x in t)
+                if history.direction == 'reverse':
+                    vocab_breakdown.append([t, wk, wi.get('type', 'unknown'), word_results[i]['is_correct']])
+                else:
+                    vocab_breakdown.append([wk, t, wi.get('type', 'unknown'), word_results[i]['is_correct']])
+                correct_parts.append(wk if history.direction == 'reverse' else t)
+            correct_trans = ', '.join(correct_parts)
+
+            judgement = {
+                'score': score,
+                'correct_translation': correct_trans,
+                'evaluation': evaluation,
+                'vocabulary_breakdown': vocab_breakdown
+            }
+            judge_ms = 0
 
         elif is_multi_vocab:
             # Multi-word vocabulary challenge (4 words, stored as english keys)
@@ -1655,14 +1800,14 @@ async def submit_translation(request: TranslationRequest):
         current_round.translation = request.translation
 
         # Challenges have separate scoring, don't affect level progress
-        if is_verb_challenge or is_vocab_challenge or is_word_challenge or is_synonym_challenge:
+        if is_verb_challenge or is_vocab_challenge or is_word_challenge or is_synonym_challenge or is_weakwords_challenge:
             current_round.judgement = judgement
             current_round.judge_ms = judge_ms
             current_round.evaluated = True
             history.total_completed += 1
 
             # Record challenge stats
-            challenge_type = 'verb' if is_verb_challenge else ('synonym' if is_synonym_challenge else ('vocab' if is_vocab_challenge else 'word'))
+            challenge_type = 'weakwords' if is_weakwords_challenge else ('verb' if is_verb_challenge else ('synonym' if is_synonym_challenge else ('vocab' if is_vocab_challenge else 'word')))
             if is_verb_challenge:
                 # For verb challenges, count translation correctness for the word stat
                 is_fully_correct = judgement.get('translation_correct', False)
@@ -1711,8 +1856,8 @@ async def submit_translation(request: TranslationRequest):
                 change_type=None
             )
 
-            # Include per-word results for multi-word vocab challenges
-            if is_multi_vocab:
+            # Include per-word results for multi-word challenges
+            if is_multi_vocab or is_weakwords_challenge:
                 response.word_results = word_results
 
             return response
