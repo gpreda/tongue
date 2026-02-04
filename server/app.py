@@ -324,6 +324,14 @@ def format_practice_time(seconds: int) -> str:
         return f"{hours}h {minutes}m"
 
 
+def is_corrupted_word(word: str, lang_code: str) -> bool:
+    """Check if a word in history.words is a corrupted English entry.
+    Corrupted entries are English words stored as target-language keys,
+    detectable when the word_translations cache maps a word to itself."""
+    cached = storage.get_word_translation(word, language=lang_code)
+    return cached is not None and cached['translation'].lower().strip() == word.lower().strip()
+
+
 def log_event(event: str, user_id: str, **data) -> int | None:
     """Log an event to the database. Returns the event ID."""
     if storage and hasattr(storage, 'log_event'):
@@ -966,10 +974,13 @@ async def _get_next_sentence_inner(user_id: str = "default"):
 
         if selected_challenge == 'weakwords' and current_round is None:
             weak_words = history.get_weakest_words(6)
-            if weak_words:
+            if weak_words and history.direction == 'normal':
+                # Filter out corrupted English entries in normal mode
+                weak_words = [w for w in weak_words if not is_corrupted_word(w['word'], lang_code)]
+            if weak_words and len(weak_words) >= 6:
                 is_weakwords_challenge = True
-                weakwords_challenge = {'words': weak_words}
-                words_str = ','.join(w['word'] for w in weak_words)
+                weakwords_challenge = {'words': weak_words[:6]}
+                words_str = ','.join(w['word'] for w in weak_words[:6])
                 from core.models import TongueRound
                 current_round = TongueRound(f"WEAK6:{words_str}", history.difficulty, 0)
                 history.rounds.append(current_round)
@@ -1000,10 +1011,8 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             challenge_word = history.get_challenge_word()
             if challenge_word:
                 # In normal mode, verify the word isn't a corrupted English entry
-                # by checking if word_translations cache maps it to itself
                 cw = challenge_word['word']
-                cached_trans = storage.get_word_translation(cw, language=lang_code) if history.direction == 'normal' else None
-                if cached_trans and cached_trans['translation'].lower().strip() == cw.lower().strip():
+                if history.direction == 'normal' and is_corrupted_word(cw, lang_code):
                     logger.warning(f"Skipping corrupted word challenge: '{cw}' translates to itself")
                     challenge_word = None
                 else:
