@@ -164,6 +164,21 @@ class FileStorage(Storage):
             print(f"Error getting word translation: {e}")
             return None
 
+    def word_exists_as_translation(self, word: str, language: str = 'es') -> bool:
+        """Check if a word appears as an English translation of any target-language entry."""
+        try:
+            translations = self._load_translations()
+            word_lower = word.lower().strip()
+            for key, val in translations.items():
+                stored_word = key.split(':')[0] if ':' in key else key
+                if stored_word.lower().strip() == word_lower:
+                    continue
+                if isinstance(val, dict) and val.get('translation', '').lower().strip() == word_lower:
+                    return True
+            return False
+        except Exception:
+            return False
+
     def save_word_translation(self, word: str, translation: str, word_type: str, language: str = 'es') -> None:
         """Save translation for a word."""
         try:

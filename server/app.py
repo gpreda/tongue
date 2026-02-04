@@ -324,12 +324,40 @@ def format_practice_time(seconds: int) -> str:
         return f"{hours}h {minutes}m"
 
 
+_ENGLISH_FUNCTION_WORDS = frozenset({
+    'a', 'an', 'the', 'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+    'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must',
+    'not', 'and', 'or', 'but', 'if', 'when', 'where', 'how', 'what', 'who',
+    'which', 'that', 'this', 'these', 'those', 'it', 'he', 'she', 'we', 'they',
+    'i', 'me', 'my', 'you', 'your', 'his', 'her', 'its', 'our', 'their',
+    'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'up', 'about',
+})
+
+
 def is_corrupted_word(word: str, lang_code: str) -> bool:
     """Check if a word in history.words is a corrupted English entry.
-    Corrupted entries are English words stored as target-language keys,
-    detectable when the word_translations cache maps a word to itself."""
+    Corrupted entries are English words stored as target-language keys.
+    Uses multiple heuristics: self-translation, English function word detection,
+    and reverse DB lookup."""
+    word_lower = word.lower().strip()
+
+    # Check 1: word_translations maps word to itself
     cached = storage.get_word_translation(word, language=lang_code)
-    return cached is not None and cached['translation'].lower().strip() == word.lower().strip()
+    if cached is not None and cached['translation'].lower().strip() == word_lower:
+        return True
+
+    # Check 2: word contains common English function words (split by comma/space)
+    tokens = {t.strip().lower() for t in word_lower.replace(',', ' ').split() if t.strip()}
+    if tokens & _ENGLISH_FUNCTION_WORDS:
+        return True
+
+    # Check 3: word appears as an English translation of another target-language entry
+    if storage and hasattr(storage, 'word_exists_as_translation'):
+        if storage.word_exists_as_translation(word, language=lang_code):
+            return True
+
+    return False
 
 
 def log_event(event: str, user_id: str, **data) -> int | None:
@@ -1167,6 +1195,17 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             else:
                 # Word, verb, and weakwords challenges use the session direction
                 is_rev = history.direction == 'reverse'
+                # For word challenges in normal mode, check if the word key was
+                # a corrupted English entry — if so, the actual direction was inverted
+                if not is_rev and prev_challenge_type in ('word', 'weakwords') and prev.sentence:
+                    if prev.sentence.startswith("WORD:"):
+                        word_key = prev.sentence[5:]
+                        if is_corrupted_word(word_key, lang_code):
+                            is_rev = True
+                    elif prev.sentence.startswith("WEAK6:"):
+                        word_keys = prev.sentence[6:].split(",")
+                        if any(is_corrupted_word(wk, lang_code) for wk in word_keys):
+                            is_rev = True
                 prev_challenge_direction = f"EN → {lang_upper}" if is_rev else f"{lang_upper} → EN"
 
         previous_eval = {

@@ -457,6 +457,21 @@ class PostgresStorage(Storage):
             print(f"Error getting word translation: {e}")
             return None
 
+    def word_exists_as_translation(self, word: str, language: str = 'es') -> bool:
+        """Check if a word appears as an English translation of any target-language entry."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    """SELECT 1 FROM word_translations
+                       WHERE language = %s AND word != %s AND translation ILIKE %s
+                       LIMIT 1""",
+                    (language, word, word)
+                )
+                return cur.fetchone() is not None
+        except Exception as e:
+            print(f"Error checking word_exists_as_translation: {e}")
+            return False
+
     def save_word_translation(self, word: str, translation: str, word_type: str, language: str = 'es') -> None:
         """Save translation for a word."""
         try:
@@ -552,18 +567,21 @@ class PostgresStorage(Storage):
     def log_event(self, event: str, user_id: str, session_id: str = None,
                   difficulty: int = None, app_name: str = "tongue", ms: int = None,
                   ai_used: bool = False, model_name: str = None,
-                  model_tokens: int = None, model_ms: int = None, **data) -> None:
-        """Log an event to the database."""
+                  model_tokens: int = None, model_ms: int = None, **data) -> int | None:
+        """Log an event to the database. Returns the event ID."""
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO events (app_name, event, user_id, session_id, difficulty, ms,
                                         ai_used, model_name, model_tokens, model_ms, data)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
                 """, (app_name, event, user_id, session_id, difficulty, ms,
                       ai_used, model_name, model_tokens, model_ms,
                       json.dumps(data) if data else None))
+                event_id = cur.fetchone()[0]
             self.conn.commit()
+            return event_id
         except Exception as e:
             print(f"Error logging event: {e}")
             self.conn.rollback()
