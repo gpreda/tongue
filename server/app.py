@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import time
 import traceback
 import unicodedata
@@ -41,6 +42,21 @@ _DEFAULT_ACCENT_WORDS = {
     'que', 'como', 'donde', 'cuando', 'cual', 'quien',
     'aun', 'solo',
 }
+
+
+def _is_corrupted_verb(conjugated_form: str, translation: str) -> bool:
+    """Detect corrupted verb entries where an English word was stored as a target-language verb.
+
+    For valid entries the conjugated form is in the target language and the translation
+    is in English, so the form won't appear in the translation.  For corrupted entries
+    both are English, e.g. conjugated_form='gives', translation='he/she/it gives'.
+    """
+    if not conjugated_form or not translation:
+        return False
+    cf = conjugated_form.lower().strip()
+    tr = translation.lower()
+    # Check if the conjugated form appears as a whole word in the translation
+    return bool(re.search(r'\b' + re.escape(cf) + r'\b', tr))
 
 
 def strip_accents(s: str) -> str:
@@ -306,8 +322,8 @@ def format_practice_time(seconds: int) -> str:
         return f"{hours}h {minutes}m"
 
 
-def log_event(event: str, user_id: str, **data) -> None:
-    """Log an event to the database."""
+def log_event(event: str, user_id: str, **data) -> int | None:
+    """Log an event to the database. Returns the event ID."""
     if storage and hasattr(storage, 'log_event'):
         history = user_histories.get(user_id)
         difficulty = history.difficulty if history else None
@@ -317,10 +333,11 @@ def log_event(event: str, user_id: str, **data) -> None:
         model_name = data.pop('model_name', None)
         model_tokens = data.pop('model_tokens', None)
         model_ms = data.pop('model_ms', None)
-        storage.log_event(event, user_id, session_id, difficulty,
+        return storage.log_event(event, user_id, session_id, difficulty,
                           ai_used=ai_used, model_name=model_name,
                           model_tokens=model_tokens, model_ms=model_ms,
                           **data)
+    return None
 
 
 app = FastAPI(title="Tongue API", description="Multi-language translation practice API")
@@ -857,16 +874,16 @@ async def _get_next_sentence_inner(user_id: str = "default"):
     lang_code = history.language
     lang_info = get_user_language_info(user_id)
     if current_round is None:
-        # Check if it's verb challenge turn (every 7th turn)
-        if history.is_verb_challenge_turn():
+        # Adaptive challenge selection: ~30% chance, weighted by inverse success rate
+        selected_challenge = history.pick_challenge_type()
+
+        if selected_challenge == 'verb':
             verb_word = history.get_verb_for_challenge()
             if verb_word:
-                # Check storage for existing conjugation, or query AI
                 stored = storage.get_verb_conjugation(verb_word, language=lang_code)
                 if stored:
                     verb_challenge = {'conjugated_form': verb_word, **stored}
                 else:
-                    # Query AI for verb conjugation
                     ai_result = ai_provider.analyze_verb_conjugation(verb_word, language_info=lang_info)
                     if ai_result:
                         storage.save_verb_conjugation(
@@ -876,6 +893,10 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                         )
                         verb_challenge = {'conjugated_form': verb_word, **ai_result}
 
+                if verb_challenge and _is_corrupted_verb(verb_word, verb_challenge.get('translation', '')):
+                    logger.warning(f"Skipping corrupted verb entry: {verb_word} -> {verb_challenge.get('translation')}")
+                    verb_challenge = None
+
                 if verb_challenge:
                     is_verb_challenge = True
                     from core.models import TongueRound
@@ -883,15 +904,12 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                     history.rounds.append(current_round)
                     save_history(user_id)
 
-        # Check if it's synonym/antonym challenge turn (every 11th turn)
-        if current_round is None and history.is_synonym_challenge_turn():
+        if selected_challenge == 'synonym' and current_round is None:
             syn_word_info = history.get_word_for_synonym_challenge()
             if syn_word_info:
                 syn_word = syn_word_info['word']
-                # Check cache first
                 cached = storage.get_synonym_antonym(syn_word, language=lang_code)
                 if not cached:
-                    # Generate via AI and cache
                     ai_result = ai_provider.generate_synonym_antonym(syn_word, language_info=lang_info)
                     if ai_result:
                         storage.save_synonym_antonym(
@@ -901,7 +919,6 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                         cached = ai_result
 
                 if cached:
-                    # Randomly pick SYN or ANT
                     has_synonym = cached.get('synonym') is not None
                     has_antonym = cached.get('antonym') is not None
 
@@ -926,15 +943,12 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                         history.rounds.append(current_round)
                         save_history(user_id)
 
-        # Check if it's vocab challenge turn (every 4th turn, offset by 2)
-        if current_round is None and history.is_vocab_challenge_turn():
+        if selected_challenge == 'vocab' and current_round is None:
             vocab_challenge = history.get_vocab_challenge()
             if vocab_challenge:
                 is_vocab_challenge = True
                 from core.models import TongueRound
                 if vocab_challenge.get('is_multi'):
-                    # Multi-word: store as VOCAB4:category:eng1,eng2,eng3,eng4
-                    # or VOCAB4R:category:eng1,eng2,eng3,eng4
                     words_str = ','.join(w['english'] for w in vocab_challenge['words'])
                     prefix = 'VOCAB4R' if vocab_challenge.get('is_reverse') else 'VOCAB4'
                     current_round = TongueRound(
@@ -942,8 +956,6 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                         history.difficulty, 0
                     )
                 else:
-                    # Single-word: store as VOCAB:category:english_key
-                    # or VOCABR:category:english_key for reverse (en->es)
                     prefix = 'VOCABR' if vocab_challenge.get('is_reverse') else 'VOCAB'
                     current_round = TongueRound(
                         f"{prefix}:{vocab_challenge['category']}:{vocab_challenge['english']}",
@@ -952,12 +964,10 @@ async def _get_next_sentence_inner(user_id: str = "default"):
                 history.rounds.append(current_round)
                 save_history(user_id)
 
-        # Check if it's word challenge turn
-        if current_round is None and history.is_word_challenge_turn():
+        if selected_challenge == 'word' and current_round is None:
             challenge_word = history.get_challenge_word()
             if challenge_word:
                 is_word_challenge = True
-                # Create a special round for word challenge
                 from core.models import TongueRound
                 current_round = TongueRound(f"WORD:{challenge_word['word']}", history.difficulty, 0)
                 history.rounds.append(current_round)
@@ -1106,6 +1116,23 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             'challenge_type': prev_challenge_type,
             'challenge_direction': prev_challenge_direction
         }
+
+        # Log full previous result data for debugging
+        event_id = log_event('previous_result.display', user_id,
+            raw_sentence=prev.sentence,
+            display_sentence=prev_sentence,
+            translation=prev.translation,
+            score=prev.get_score(),
+            correct_translation=prev.judgement.get('correct_translation') if prev.judgement else None,
+            evaluation=prev.judgement.get('evaluation') if prev.judgement else None,
+            vocabulary_breakdown=prev.judgement.get('vocabulary_breakdown') if prev.judgement else None,
+            challenge_type=prev_challenge_type,
+            challenge_direction=prev_challenge_direction,
+            direction=history.direction,
+            full_judgement=prev.judgement,
+        )
+        if event_id:
+            previous_eval['event_id'] = event_id
 
     # For challenges, return just the word; for sentences, return the sentence
     sentence = round.sentence
@@ -1557,8 +1584,11 @@ async def submit_translation(request: TranslationRequest):
                         if isinstance(correct_translation, list):
                             correct_translation = ', '.join(correct_translation)
 
-            # Parse correct answers (comma-separated)
+            # Parse correct answers (comma-separated or space-separated synonyms)
             correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
+            # Also split by space to handle AI-generated synonym pairs (e.g. "rápidos veloz")
+            if len(correct_answers) == 1 and ' ' in correct_answers[0]:
+                correct_answers = [t.strip().lower() for t in correct_translation.replace(',', ' ').split() if t.strip()]
 
             # Check if translation matches (case-insensitive, with plural tolerance)
             student_answer = request.translation.strip().lower()
@@ -1587,11 +1617,13 @@ async def submit_translation(request: TranslationRequest):
                 is_correct = any(accent_lenient_match(student_answer, a, target_is_spanish=target_is_spanish, accent_words=accent_set) for a in correct_answers)
 
             score = 100 if is_correct else 0
+            # Display synonyms with " / " separator for readability
+            display_translation = ' / '.join(correct_answers) if len(correct_answers) > 1 else correct_translation
             judgement = {
                 'score': score,
-                'correct_translation': correct_translation,
-                'evaluation': 'Correct!' if is_correct else f'The correct translation is: {correct_translation}',
-                'vocabulary_breakdown': [[word_info.get('translation', ''), word, word_type, is_correct]] if history.direction == 'reverse' else [[word, correct_translation, word_type, is_correct]]
+                'correct_translation': display_translation,
+                'evaluation': 'Correct!' if is_correct else f'The correct translation is: {display_translation}',
+                'vocabulary_breakdown': [[word_info.get('translation', ''), word, word_type, is_correct]] if history.direction == 'reverse' else [[word, display_translation, word_type, is_correct]]
             }
             judge_ms = 0
 

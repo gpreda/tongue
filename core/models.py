@@ -5,11 +5,10 @@ import random
 from .config import (
     MIN_DIFFICULTY, MAX_DIFFICULTY,
     ADVANCE_WINDOW_SIZE, ADVANCE_SCORE_THRESHOLD, ADVANCE_REQUIRED_GOOD,
-    DEMOTE_SCORE_THRESHOLD, DEMOTE_REQUIRED_POOR
+    DEMOTE_SCORE_THRESHOLD, DEMOTE_REQUIRED_POOR,
+    CHALLENGE_PROBABILITY
 )
 from .utils import split_into_sentences
-
-WORD_CHALLENGE_INTERVAL = 3  # Every 3rd turn
 
 
 class TongueRound:
@@ -480,6 +479,39 @@ class History:
                 word = ' '.join(str(w) for w in word)
             if isinstance(english, list):
                 english = ', '.join(str(e) for e in english)
+            # AI sometimes returns multiple synonyms as a space-separated string
+            # (e.g. "rápidos veloz" for "fast"). Split into separate word entries
+            # so each synonym is tracked and challenged individually.
+            if word and ' ' in word.strip() and ',' not in word:
+                synonym_words = word.strip().split()
+                if len(synonym_words) <= 3:  # likely synonyms, not a phrase
+                    for sw in synonym_words:
+                        sw = sw.strip()
+                        if not sw:
+                            continue
+                        if sw not in self.words:
+                            self.words[sw] = {
+                                'type': (v_breakdown[2] or 'unknown').lower(),
+                                'translation': english,
+                                'correct_count': 0,
+                                'incorrect_count': 0
+                            }
+                        if v_breakdown[3]:
+                            self.words[sw]['correct_count'] += 1
+                        else:
+                            self.words[sw]['incorrect_count'] += 1
+                            self.words[sw]['challenge_passed'] = False
+                    continue
+            # Safety net: detect when AI returned vocabulary_breakdown in wrong order.
+            # The word (target language) should NOT appear in the original sentence for
+            # regular translations. If it does but english doesn't, they're likely swapped.
+            sentence_lower = (round.sentence or '').lower()
+            word_lower = (word or '').lower().strip()
+            english_lower = (english or '').lower().strip()
+            if (word_lower and english_lower and word_lower != english_lower
+                    and word_lower in sentence_lower.split()
+                    and english_lower not in sentence_lower.split()):
+                word, english = english, word
             # Skip entries where word == english (AI returned same value for both,
             # so we can't determine the correct translation)
             if word and english and word.lower().strip() == english.lower().strip():
@@ -621,15 +653,60 @@ class History:
                     })
         return sorted(learning, key=lambda x: x['total'], reverse=True)
 
-    def is_word_challenge_turn(self) -> bool:
-        """Check if this turn should be a word challenge."""
-        # Need at least some words to challenge
-        if len(self.words) < 3:
-            return False
-        # Every Nth turn (but not the first few)
-        if self.total_completed < WORD_CHALLENGE_INTERVAL:
-            return False
-        return self.total_completed % WORD_CHALLENGE_INTERVAL == 0
+    def is_challenge_turn(self) -> bool:
+        """Roll whether this turn should be a challenge (~30% chance)."""
+        return random.random() < CHALLENGE_PROBABILITY
+
+    def get_challenge_category_weights(self) -> dict[str, float]:
+        """Return {category: weight} for eligible categories based on success rates.
+        Weight = 100 - success_rate. Categories with 0 attempts get weight 100."""
+        weights = {}
+        # word: need at least 3 words
+        if len(self.words) >= 3:
+            weights['word'] = self._challenge_weight('word')
+        # vocab: always eligible
+        weights['vocab'] = self._challenge_weight('vocab')
+        # verb: need at least 1 verb
+        has_verb = any(
+            (info.get('type') or '').lower() == 'verb'
+            for info in self.words.values()
+        )
+        if has_verb:
+            weights['verb'] = self._challenge_weight('verb')
+        # synonym: need >= 5 words and at least 1 noun/verb/adjective
+        if len(self.words) >= 5:
+            has_eligible = any(
+                (info.get('type') or '').lower() in ('noun', 'verb', 'adjective')
+                for info in self.words.values()
+            )
+            if has_eligible:
+                weights['synonym'] = self._challenge_weight('synonym')
+        return weights
+
+    def _challenge_weight(self, category: str) -> float:
+        """Compute weight for a challenge category: 100 - success_rate.
+        No attempts = success_rate 0% = weight 100."""
+        stats = self.challenge_stats.get(category, {'correct': 0, 'incorrect': 0})
+        total = stats['correct'] + stats['incorrect']
+        if total == 0:
+            return 100.0
+        success_rate = (stats['correct'] / total) * 100
+        return max(100.0 - success_rate, 0.0)
+
+    def pick_challenge_type(self) -> str | None:
+        """Decide whether this turn is a challenge and which category.
+        Returns category name ('word', 'vocab', 'verb', 'synonym') or None."""
+        if not self.is_challenge_turn():
+            return None
+        weights = self.get_challenge_category_weights()
+        if not weights:
+            return None
+        # If all weights are 0, use uniform distribution
+        categories = list(weights.keys())
+        w = list(weights.values())
+        if all(v == 0 for v in w):
+            return random.choice(categories)
+        return random.choices(categories, weights=w, k=1)[0]
 
     @staticmethod
     def _is_proper_noun(word: str) -> bool:
@@ -698,13 +775,6 @@ class History:
             'translation': chosen['translation']
         }
 
-    def is_vocab_challenge_turn(self) -> bool:
-        """Check if this turn should be a vocabulary category challenge."""
-        # Every 4th turn (offset from word challenges)
-        if self.total_completed < 4:
-            return False
-        return self.total_completed % 4 == 2  # Offset so it doesn't overlap with word challenges
-
     def get_vocab_challenge(self) -> dict | None:
         """Get a vocabulary challenge from a random category.
         Each category has equal probability. Each word within a category has equal probability.
@@ -737,22 +807,6 @@ class History:
         else:
             self.vocab_progress[category][english_key]['incorrect'] += 1
 
-    def is_verb_challenge_turn(self) -> bool:
-        """Check if this turn should be a verb challenge."""
-        # Every 7th turn (offset from other challenges)
-        if self.total_completed < 7:
-            return False
-        return self.total_completed % 7 == 0
-
-    def is_synonym_challenge_turn(self) -> bool:
-        """Check if this turn should be a synonym/antonym challenge."""
-        # Every 11th turn (offset from verb's % 7)
-        if self.total_completed < 11:
-            return False
-        if len(self.words) < 5:
-            return False
-        return self.total_completed % 11 == 0
-
     def get_word_for_synonym_challenge(self) -> dict | None:
         """Get a word from user's learned words for synonym/antonym challenge.
         Only picks nouns, verbs, adjectives (skips proper nouns).
@@ -776,7 +830,7 @@ class History:
 
     def get_verb_for_challenge(self) -> str | None:
         """Get a verb from user's word history for verb challenge.
-        Returns the Spanish verb or None if no verbs available."""
+        Returns the target-language verb or None if no verbs available."""
         verbs = []
         for word, info in self.words.items():
             word_type = (info.get('type') or '').lower()
