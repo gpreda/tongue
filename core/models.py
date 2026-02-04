@@ -287,6 +287,9 @@ class History:
         history._reverse_state = data.get('_reverse_state', None)
         history.language = data.get('language', 'es')
         history._language_states = data.get('_language_states', {})
+        # One-time cleanup: fix words stored with English keys due to safety-net bug
+        if history.words:
+            history._cleanup_swapped_words()
         return history
 
     def _migrate_legacy_words(self) -> None:
@@ -314,6 +317,58 @@ class History:
                     'correct_count': 0,
                     'incorrect_count': info.get('count', 1)
                 }
+
+    def _cleanup_swapped_words(self) -> None:
+        """Fix words stored with English keys due to inverted safety-net bug.
+
+        A bug in the vocabulary_breakdown safety net caused English translations
+        to be stored as word keys (with the target-language word as the translation).
+        This detects and fixes those entries by checking if a word's translation
+        already exists as another key in the words dict.
+        """
+        to_delete = []
+        to_merge = {}  # target_word -> list of english entries to merge from
+
+        for word, info in list(self.words.items()):
+            trans = info.get('translation', '')
+            if isinstance(trans, list):
+                # Can't reliably detect swap for list translations
+                continue
+            if not trans or trans.lower().strip() == word.lower().strip():
+                continue
+            # Check if this word's translation exists as another key
+            # AND that other key's translation matches this word
+            # This is a strong signal that word/translation are swapped
+            trans_stripped = trans.strip()
+            if trans_stripped in self.words:
+                other = self.words[trans_stripped]
+                other_trans = other.get('translation', '')
+                if isinstance(other_trans, list):
+                    other_trans_str = ', '.join(str(t) for t in other_trans)
+                else:
+                    other_trans_str = other_trans or ''
+                # If the other entry's translation contains this word, they're mirrors
+                if word.lower() in other_trans_str.lower():
+                    # The trans_stripped key is the correct target-language entry
+                    # Merge counts from this (corrupted) entry into it
+                    to_merge.setdefault(trans_stripped, []).append(word)
+                    to_delete.append(word)
+
+        for target_word, english_keys in to_merge.items():
+            for eng_key in english_keys:
+                eng_info = self.words[eng_key]
+                self.words[target_word]['incorrect_count'] += eng_info.get('incorrect_count', 0)
+                self.words[target_word]['correct_count'] += eng_info.get('correct_count', 0)
+                if eng_info.get('challenge_passed') is False:
+                    self.words[target_word]['challenge_passed'] = False
+
+        for word in to_delete:
+            del self.words[word]
+            # Also clean up legacy structures
+            if word in self.missed_words:
+                del self.missed_words[word]
+            if word in self.correct_words:
+                self.correct_words.remove(word)
 
     def _migrate_vocab_progress_keys(self) -> None:
         """Migrate vocab_progress from Spanish word keys to English keys.
@@ -505,14 +560,16 @@ class History:
                             self.words[sw]['challenge_passed'] = False
                     continue
             # Safety net: detect when AI returned vocabulary_breakdown in wrong order.
-            # The word (target language) should NOT appear in the original sentence for
-            # regular translations. If it does but english doesn't, they're likely swapped.
+            # The word (target language) SHOULD appear in the original sentence.
+            # If english appears in the sentence but word doesn't, they're likely swapped.
             sentence_lower = (round.sentence or '').lower()
             word_lower = (word or '').lower().strip()
             english_lower = (english or '').lower().strip()
+            # Strip punctuation from sentence words for robust matching
+            sentence_words = {w.strip('.,;:!?¿¡"\'()[]') for w in sentence_lower.split()}
             if (word_lower and english_lower and word_lower != english_lower
-                    and word_lower in sentence_lower.split()
-                    and english_lower not in sentence_lower.split()):
+                    and word_lower not in sentence_words
+                    and english_lower in sentence_words):
                 word, english = english, word
             # Skip entries where word == english (AI returned same value for both,
             # so we can't determine the correct translation)
