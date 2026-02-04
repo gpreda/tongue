@@ -733,8 +733,8 @@ class History:
         )
         if has_verb:
             weights['verb'] = self._challenge_weight('verb')
-        # synonym: need >= 5 words and at least 1 noun/verb/adjective
-        if len(self.words) >= 5:
+        # synonym: only in reverse mode (L1→L2), need >= 5 words and at least 1 noun/verb/adjective
+        if self.direction == 'reverse' and len(self.words) >= 5:
             has_eligible = any(
                 (info.get('type') or '').lower() in ('noun', 'verb', 'adjective')
                 for info in self.words.values()
