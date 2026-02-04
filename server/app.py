@@ -999,11 +999,19 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         if selected_challenge == 'word' and current_round is None:
             challenge_word = history.get_challenge_word()
             if challenge_word:
-                is_word_challenge = True
-                from core.models import TongueRound
-                current_round = TongueRound(f"WORD:{challenge_word['word']}", history.difficulty, 0)
-                history.rounds.append(current_round)
-                save_history(user_id)
+                # In normal mode, verify the word isn't a corrupted English entry
+                # by checking if word_translations cache maps it to itself
+                cw = challenge_word['word']
+                cached_trans = storage.get_word_translation(cw, language=lang_code) if history.direction == 'normal' else None
+                if cached_trans and cached_trans['translation'].lower().strip() == cw.lower().strip():
+                    logger.warning(f"Skipping corrupted word challenge: '{cw}' translates to itself")
+                    challenge_word = None
+                else:
+                    is_word_challenge = True
+                    from core.models import TongueRound
+                    current_round = TongueRound(f"WORD:{cw}", history.difficulty, 0)
+                    history.rounds.append(current_round)
+                    save_history(user_id)
 
         # If not any challenge, get regular sentence
         if current_round is None:
@@ -1728,6 +1736,34 @@ async def submit_translation(request: TranslationRequest):
                         # Handle list translations
                         if isinstance(correct_translation, list):
                             correct_translation = ', '.join(correct_translation)
+
+                # Detect corrupted entry: English word stored as target-language key.
+                # If translation equals the word itself, the word is English, not target language.
+                if correct_translation.lower().strip() == word.lower().strip():
+                    word_info = history.words.get(word, {})
+                    hist_trans = word_info.get('translation', '')
+                    if isinstance(hist_trans, list):
+                        hist_trans = ', '.join(str(t) for t in hist_trans)
+                    if hist_trans and hist_trans.lower().strip() != word.lower().strip():
+                        logger.warning(f"Corrupted word entry detected: '{word}' is English, "
+                                       f"swapping with translation '{hist_trans}'")
+                        # Fix history.words: swap key and translation
+                        old_info = history.words.pop(word)
+                        target_word = hist_trans.strip()
+                        if target_word not in history.words:
+                            history.words[target_word] = {
+                                **old_info,
+                                'translation': word,
+                            }
+                        else:
+                            # Target word already exists, just merge counts
+                            history.words[target_word]['correct_count'] += old_info.get('correct_count', 0)
+                            history.words[target_word]['incorrect_count'] += old_info.get('incorrect_count', 0)
+                        save_history(user_id)
+                        # Fix word_translations cache
+                        storage.save_word_translation(target_word, word, word_type, language=lang_code)
+                        # Use the English word as correct translation
+                        correct_translation = word
 
             # Parse correct answers (comma-separated or space-separated synonyms)
             correct_answers = [t.strip().lower() for t in correct_translation.split(',')]
