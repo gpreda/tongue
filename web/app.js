@@ -1165,15 +1165,22 @@ async function handleDowngrade() {
 
 async function handleResetStory() {
     if (!confirm('Get a new story? The current story will be discarded.')) return;
+
+    // Show loading immediately for better UX
+    elements.loading.classList.remove('hidden');
+    elements.loading.innerHTML = '<p>Generating new story — this can take up to 30 seconds...</p>';
+    elements.currentTask.classList.add('hidden');
+    elements.validationResult.classList.add('hidden');
+
     try {
         const data = await api(`/api/reset-story?user_id=${currentUser}`, { method: 'POST' });
         if (data.success) {
             loadNextSentence();
         } else {
-            alert(data.error || 'Failed to reset story.');
+            elements.loading.innerHTML = `<p>Error: ${data.error || 'Failed to reset story.'}</p>`;
         }
     } catch (e) {
-        alert('Failed to reset story.');
+        elements.loading.innerHTML = `<p>Error: Failed to reset story.</p><p><button onclick="loadNextSentence()">Retry</button></p>`;
     }
 }
 
