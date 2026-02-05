@@ -1909,6 +1909,17 @@ async def submit_translation(request: TranslationRequest):
                     if word in history.words:
                         history.words[word]['challenge_passed'] = True
 
+            # For weakwords challenges, update per-word success rates
+            if is_weakwords_challenge:
+                words_str = current_round.sentence[6:]  # Remove "WEAK6:" prefix
+                word_keys = words_str.split(",")
+                for i, wk in enumerate(word_keys):
+                    if wk in history.words and i < len(word_results):
+                        if word_results[i]['is_correct']:
+                            history.words[wk]['correct_count'] = history.words[wk].get('correct_count', 0) + 1
+                        else:
+                            history.words[wk]['incorrect_count'] = history.words[wk].get('incorrect_count', 0) + 1
+
             # Store the evaluated round so it shows on next page
             history.last_evaluated_round = current_round
             history.last_level_changed = False

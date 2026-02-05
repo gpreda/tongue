@@ -246,6 +246,10 @@ class GeminiProvider(AIProvider):
                  (NOT literally "fulfill X years" or "celebrate X years")
                - "tener X años" = "to be X years old" (NOT "to have X years")
                - "hacer calor/frío" = "to be hot/cold" (NOT "to make heat/cold")
+               - "cerca de/del" = "near the" or "close to the" (NOT "near of the")
+               - "lejos de" = "far from" (NOT "far of")
+               - "antes de" = "before" (NOT "before of")
+               - "después de" = "after" (NOT "after of")
                When a student correctly translates an idiom, mark all component words as correct.
             3. A word is INCORRECTLY translated if:
                - Left in {source_language} (not translated at all, e.g., "casa" instead of "house")
@@ -265,6 +269,11 @@ class GeminiProvider(AIProvider):
                  they change the word's meaning (e.g., "el" vs "él", "tu" vs "tú", "si" vs "sí").
                - Reflexive pronouns (se, me, te) that are naturally absorbed into English phrasal verbs
                  (e.g., "se pone" → "puts on" is correct, don't require "himself/herself")
+               - Prepositions or function words absorbed into another translated phrase
+                 (e.g., "del" in "cerca del radiador" → "near the radiator" — the "de" is absorbed
+                 into "near" and "el" into "the"; do NOT require a separate "of the")
+               - Synonyms that capture the same meaning even if not the most literal translation
+                 (e.g., "heater" for "radiador", "big" for "grande", "scared" for "asustado")
                - Grammar elements that have no direct equivalent when the meaning is preserved
                - Omitting subject pronouns (I, he, she, it, they, etc.) in pro-drop languages where
                  the subject is implied or unnecessary (e.g., "It is winter" → "Zima je" is correct,
@@ -287,8 +296,10 @@ class GeminiProvider(AIProvider):
             STEP 3 - RESPOND with a Python dictionary:
 
             'vocabulary_breakdown': A list of lists, one for each meaningful word/phrase:
-              [0] The {source_language} word/phrase from the original sentence
-              [1] The correct {target_language} translation(s) for this word in context
+              [0] The {source_language} word/phrase from the original sentence (MUST be in {source_language})
+              [1] The correct {target_language} translation(s) for this word in context (MUST be in {target_language})
+              IMPORTANT: The order is ALWAYS [{source_language} word, {target_language} translation].
+              For example, if source is English and target is Spanish: ["swim", "nadan"] NOT ["nadan", "swim"].
               [2] Part of speech (noun, verb, adjective, etc.)
               [3] Boolean: True ONLY if the student's translation contains a valid {target_language} equivalent.
                   False if: the word was mistranslated,
