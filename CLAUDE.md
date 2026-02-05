@@ -14,3 +14,10 @@ When the user says "continue", "continue where we left off", "pick up where we l
 - Key decisions made
 
 This ensures work survives connection drops.
+
+## Validation Rules
+
+When asked to "check RULE1" or similar, perform thorough validation of the rule below across the codebase.
+
+**RULE1: Previous result summary language correctness**
+When the previous result summary is displayed after a challenge, if the practice direction was L1 -> L2 (e.g., English -> Spanish), the correct translation shown must be in L2 (the target language). This is a recurring bug — always validate that the "correct answer" / "correct translation" in the summary corresponds to the target language of the practice direction, not the source language.
