@@ -948,6 +948,7 @@ async function handleSubmit(e) {
 
     elements.submitBtn.disabled = true;
     elements.submitBtn.textContent = 'Validating...';
+    elements.validationResult.style.display = 'none';
 
     try {
         const result = await submitTranslation(currentSentence, translation, selectedTense, translations);
