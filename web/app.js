@@ -133,6 +133,7 @@ const elements = {
     languageModal: document.getElementById('language-modal'),
     languageOptions: document.getElementById('language-options'),
     downgradeBtn: document.getElementById('downgrade-btn'),
+    resetStoryBtn: document.getElementById('reset-story-btn'),
     learningModal: document.getElementById('learning-modal'),
     learningCount: document.getElementById('learning-count'),
     learningTbody: document.getElementById('learning-tbody'),
@@ -1162,6 +1163,20 @@ async function handleDowngrade() {
     }
 }
 
+async function handleResetStory() {
+    if (!confirm('Get a new story? The current story will be discarded.')) return;
+    try {
+        const data = await api(`/api/reset-story?user_id=${currentUser}`, { method: 'POST' });
+        if (data.success) {
+            loadNextSentence();
+        } else {
+            alert(data.error || 'Failed to reset story.');
+        }
+    } catch (e) {
+        alert('Failed to reset story.');
+    }
+}
+
 async function handleSwitchDirection() {
     try {
         const data = await api(`/api/switch-direction?user_id=${encodeURIComponent(currentUser)}`, { method: 'POST' });
@@ -1249,6 +1264,7 @@ elements.learningBtn.addEventListener('click', () => { closeMenu(); showLearning
 elements.switchDirectionBtn.addEventListener('click', () => { closeMenu(); handleSwitchDirection(); });
 elements.switchLanguageBtn.addEventListener('click', () => { closeMenu(); handleSwitchLanguage(); });
 elements.downgradeBtn.addEventListener('click', () => { closeMenu(); handleDowngrade(); });
+elements.resetStoryBtn.addEventListener('click', () => { closeMenu(); handleResetStory(); });
 elements.newGameBtn.addEventListener('click', () => { closeMenu(); handleNewGame(); });
 
 // Enter-key navigation for multi-word inputs (6 cards for weakwords, 4 for vocab)

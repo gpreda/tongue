@@ -137,6 +137,126 @@ class GeminiProvider(AIProvider):
         s = s.replace('true', 'True')
         return s
 
+    def _get_difficulty_description(self, difficulty: int, lang_name: str, is_reverse: bool = False) -> str:
+        """Generate detailed difficulty instructions based on level."""
+        # Vocabulary and grammar constraints by level
+        level_specs = {
+            0: {
+                'vocab_size': 50,
+                'vocab_desc': 'only the 50 most basic words (I, you, is, the, a, cat, dog, big, small, good, bad, food, water, house, red, blue, yes, no, hello, thank you)',
+                'grammar': 'present tense only, simple "X is Y" or "I verb" structures',
+                'sentence_words': '2-4',
+                'examples': '"The cat is big.", "I like food.", "The house is red."'
+            },
+            1: {
+                'vocab_size': 100,
+                'vocab_desc': 'only the 100 most common everyday words (basic nouns: cat, dog, house, food, water, book, car, door, table, chair; basic verbs: is, have, go, eat, drink, see, want, like; basic adjectives: big, small, good, bad, new, old, hot, cold)',
+                'grammar': 'present tense only, simple subject-verb-object sentences',
+                'sentence_words': '3-6',
+                'examples': '"The dog eats food.", "I have a big house.", "She likes the red car."'
+            },
+            2: {
+                'vocab_size': 200,
+                'vocab_desc': 'the 200 most common words (expand to include: family words, numbers 1-20, days of week, common foods, basic emotions)',
+                'grammar': 'present tense, simple past tense for common verbs (was, had, went)',
+                'sentence_words': '4-8',
+                'examples': '"Yesterday I went to the store.", "My brother has three cats.", "The food was good."'
+            },
+            3: {
+                'vocab_size': 350,
+                'vocab_desc': 'the 350 most common words (add: more verbs, household items, weather, body parts, clothing)',
+                'grammar': 'present and past tense, basic questions, simple negations',
+                'sentence_words': '5-10',
+                'examples': '"Did you see the movie yesterday?", "I don\'t have any money.", "The weather is cold today."'
+            },
+            4: {
+                'vocab_size': 500,
+                'vocab_desc': 'the 500 most common words (add: professions, places in city, nature words, more adjectives)',
+                'grammar': 'present, past, and future tense, compound sentences with "and/but/or"',
+                'sentence_words': '6-12',
+                'examples': '"I will go to the doctor tomorrow and she will help me.", "The park is beautiful but it was closed."'
+            },
+            5: {
+                'vocab_size': 750,
+                'vocab_desc': 'the 750 most common words (add: abstract nouns, more descriptive adjectives, adverbs)',
+                'grammar': 'all basic tenses, relative clauses (who, which, that), common expressions',
+                'sentence_words': '8-15',
+                'examples': '"The woman who lives next door has a garden that is very beautiful."'
+            },
+            6: {
+                'vocab_size': 1000,
+                'vocab_desc': 'the 1000 most common words (intermediate vocabulary)',
+                'grammar': 'conditional sentences (if...then), passive voice basics, reported speech',
+                'sentence_words': '10-18',
+                'examples': '"If it rains tomorrow, we would stay at home.", "The book was written by a famous author."'
+            },
+            7: {
+                'vocab_size': 1500,
+                'vocab_desc': 'the 1500 most common words (upper-intermediate vocabulary)',
+                'grammar': 'subjunctive mood, complex conditionals, varied sentence structures',
+                'sentence_words': '10-20',
+                'examples': '"I wish I had studied more when I was younger.", "Had I known earlier, I would have helped."'
+            },
+            8: {
+                'vocab_size': 2500,
+                'vocab_desc': 'the 2500 most common words (advanced vocabulary, some literary/formal words)',
+                'grammar': 'all tenses and moods, complex clauses, nuanced expressions',
+                'sentence_words': '12-22',
+                'examples': 'Complex narrative sentences with multiple clauses and sophisticated vocabulary.'
+            },
+            9: {
+                'vocab_size': 4000,
+                'vocab_desc': 'the 4000 most common words (near-native vocabulary including idioms)',
+                'grammar': 'native-level grammar, idiomatic expressions, colloquialisms',
+                'sentence_words': '12-25',
+                'examples': 'Sentences with idioms, cultural references, and nuanced meanings.'
+            },
+            10: {
+                'vocab_size': 'unlimited',
+                'vocab_desc': 'full native vocabulary including literary, technical, and archaic words',
+                'grammar': 'full native complexity, literary devices, regional expressions',
+                'sentence_words': '15-30',
+                'examples': 'Literary prose with sophisticated vocabulary and complex grammatical structures.'
+            }
+        }
+
+        spec = level_specs.get(difficulty, level_specs[5])  # Default to level 5 if out of range
+
+        if is_reverse:
+            return f"""
+            - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
+              The student will translate these English sentences into {lang_name}.
+              The difficulty refers to the {lang_name} translation complexity.
+
+              VOCABULARY CONSTRAINTS (CRITICAL - follow strictly):
+              - Use ONLY {spec['vocab_desc']}
+              - Do NOT use uncommon words like "meadow", "brook", "trail", "glisten", "pond"
+              - Prefer concrete, everyday nouns over abstract or literary words
+
+              GRAMMAR CONSTRAINTS:
+              - Grammar allowed: {spec['grammar']}
+              - Do NOT use grammar structures beyond this level
+
+              SENTENCE LENGTH: {spec['sentence_words']} words per sentence
+
+              EXAMPLES of appropriate sentences: {spec['examples']}"""
+        else:
+            return f"""
+            - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
+
+              VOCABULARY CONSTRAINTS (CRITICAL - follow strictly):
+              - Use ONLY {spec['vocab_desc']}
+              - Do NOT use uncommon or literary vocabulary beyond this level
+              - Prefer concrete, everyday words over abstract concepts
+
+              GRAMMAR CONSTRAINTS:
+              - Grammar allowed: {spec['grammar']}
+              - Do NOT use grammar structures beyond this level
+
+              SENTENCE LENGTH: {spec['sentence_words']} words per sentence
+
+              EXAMPLES of appropriate sentences: {spec['examples']}"""
+
     def generate_story(self, correct_words: list, difficulty: int, direction: str = 'normal', language_info: dict = None) -> tuple[str, int]:
         lang = language_info or _DEFAULT_LANGUAGE_INFO
         lang_name = lang['english_name']
@@ -158,25 +278,11 @@ class GeminiProvider(AIProvider):
         if direction == 'reverse':
             story_language = 'English'
             target_language = lang_name
-            difficulty_description = f"""
-            - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
-              The student will translate these English sentences into {lang_name}.
-              The difficulty refers to the {lang_name} translation complexity:
-              Level 0 = absolute beginner (very simple 2-4 word sentences, kids-level vocabulary like "the cat is big", "I like food", present tense only)
-              Level 1 = beginner (present tense, common words like "I eat food", "she has a house")
-              Level 5 = intermediate (sentences requiring varied {lang_name} vocabulary, multiple tenses)
-              Level 10 = expert (sentences requiring advanced {lang_name}: complex grammar, idioms)
-            - IMPORTANT: At level 0, sentences MUST be 2-4 words only. Use the simplest everyday words: cat, dog, big, small, food, water, good, bad, red, blue.
-            - At level 1, use very simple, short sentences with basic everyday words only. No uncommon nouns like "meadow", "stream", "trail". Stick to: cat, dog, house, food, water, school, friend, family, etc."""
+            difficulty_description = self._get_difficulty_description(difficulty, lang_name, is_reverse=True)
         else:
             story_language = lang_name
             target_language = 'English'
-            difficulty_description = f"""
-            - Difficulty level: {difficulty} out of {MAX_DIFFICULTY}
-              Level 0 = absolute beginner (very simple 2-4 word sentences, kids-level vocabulary like "the cat is big", "I like food", present tense only)
-              Level 1 = beginner (simple vocabulary, present tense, basic grammar)
-              Level 5 = intermediate (varied vocabulary, multiple tenses, compound sentences)
-              Level 10 = expert (advanced vocabulary, complex grammar, idioms)"""
+            difficulty_description = self._get_difficulty_description(difficulty, lang_name, is_reverse=False)
 
         prompt = f"""
             Story ID: {seed}
@@ -190,8 +296,6 @@ class GeminiProvider(AIProvider):
 
             Requirements:
             {difficulty_description}
-            - Each sentence should be {'2-4' if difficulty == 0 else '5-20'} words long
-            - Use vocabulary and grammar appropriate for level {difficulty}
             - Try to avoid using these nouns (the student already knows them): {', '.join(avoided_words) if avoided_words else 'none'}{script_instruction}
 
             Write only the story text, no titles, no translations, no explanations.

@@ -2159,6 +2159,18 @@ async def downgrade_level(user_id: str = "default"):
     return {"success": True, "new_level": history.difficulty}
 
 
+@app.post("/api/reset-story")
+async def reset_story(user_id: str = "default"):
+    """Clear the current story so a new one will be generated."""
+    history = get_history(user_id)
+    history.reset_story()
+    save_history(user_id)
+
+    log_event('story.reset', user_id, difficulty=history.difficulty)
+
+    return {"success": True}
+
+
 @app.post("/api/switch-direction")
 async def switch_direction(user_id: str = "default"):
     """Switch between normal (ES→EN) and reverse (EN→ES) translation direction."""

@@ -452,6 +452,10 @@ class History:
             self.level_scores = []
             self.story_sentences = []
             self.current_story = None
+            self.last_evaluated_round = None
+            # Remove any unevaluated round from previous level
+            if self.rounds and not self.rounds[-1].evaluated:
+                self.rounds.pop()
             return True
         return False
 
@@ -461,6 +465,10 @@ class History:
             self.level_scores = []
             self.story_sentences = []
             self.current_story = None
+            self.last_evaluated_round = None
+            # Remove any unevaluated round from previous level
+            if self.rounds and not self.rounds[-1].evaluated:
+                self.rounds.pop()
             return True
         return False
 
@@ -477,6 +485,16 @@ class History:
         if self.story_difficulty != self.difficulty:
             return True
         return False
+
+    def reset_story(self) -> None:
+        """Clear the current story so a new one will be generated."""
+        self.story_sentences = []
+        self.current_story = None
+        self.story_difficulty = None
+        self.story_generate_ms = 0
+        # Remove any unevaluated round from the current story
+        if self.rounds and not self.rounds[-1].evaluated:
+            self.rounds.pop()
 
     def set_story(self, story: str, difficulty: int, generate_ms: int) -> None:
         """Set a new story."""
