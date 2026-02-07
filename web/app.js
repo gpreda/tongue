@@ -17,6 +17,7 @@ let isWeakwordsChallenge = false; // Track if current task is a weakest words ch
 let isMultiVocab = false;     // Track if current task is a multi-word vocab challenge
 let isReverseVocab = false;   // Track if current task is reverse direction
 let multiVocabWords = [];     // Array of {word, translation} for multi-word challenges
+let lastSubmitResult = null;  // Stores result from last submit for immediate display
 let currentDirection = 'normal'; // 'normal' (ES→EN) or 'reverse' (EN→ES)
 let currentLanguageCode = 'es';
 let currentLanguageName = 'Spanish';
@@ -80,6 +81,10 @@ const elements = {
     prevScore: document.getElementById('prev-score'),
     prevReason: document.getElementById('prev-reason'),
     prevReasonRow: document.getElementById('prev-reason-row'),
+    prevRawAi: document.getElementById('prev-raw-ai'),
+    prevRawAiRow: document.getElementById('prev-raw-ai-row'),
+    prevWordResults: document.getElementById('prev-word-results'),
+    prevLevelChange: document.getElementById('prev-level-change'),
     prevEventId: document.getElementById('prev-event-id'),
 
     loading: document.getElementById('loading'),
@@ -112,6 +117,8 @@ const elements = {
     resultCorrect: document.getElementById('result-correct'),
     resultReason: document.getElementById('result-reason'),
     resultReasonRow: document.getElementById('result-reason-row'),
+    resultRawAi: document.getElementById('result-raw-ai'),
+    resultRawAiRow: document.getElementById('result-raw-ai-row'),
     levelChange: document.getElementById('level-change'),
     autoAdvance: document.getElementById('auto-advance'),
 
@@ -479,6 +486,17 @@ function showPreviousEvaluation(eval_data) {
         elements.prevReasonRow.classList.add('hidden');
     }
 
+    if (eval_data.raw_ai_response) {
+        elements.prevRawAiRow.classList.remove('hidden');
+        elements.prevRawAi.textContent = eval_data.raw_ai_response;
+    } else {
+        elements.prevRawAiRow.classList.add('hidden');
+    }
+
+    // Clear word results and level change (only populated from direct submit)
+    elements.prevWordResults.innerHTML = '';
+    elements.prevLevelChange.classList.add('hidden');
+
     // Show event ID for debugging reference
     if (eval_data.event_id) {
         elements.prevEventId.textContent = `Event #${eval_data.event_id}`;
@@ -493,8 +511,10 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
     elements.currentTask.classList.remove('hidden');
     elements.validationResult.classList.add('hidden');
     elements.translationInput.value = '';
+    elements.translationInput.disabled = false;
     elements.hintDisplay.classList.add('hidden');
     elements.submitBtn.disabled = false;
+    elements.submitBtn.textContent = 'Submit';
     hintUsed = false;  // Reset hint usage for new sentence
     hintWords = [];    // Reset hint words for new sentence
 
@@ -566,6 +586,7 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
                 // Reverse: show English translation, expect target word
                 wordEl.textContent = currentDirection === 'reverse' ? item.translation : item.word;
                 inputEl.value = '';
+                inputEl.disabled = false;
                 inputEl.placeholder = currentDirection === 'reverse' ? `Translate to ${currentLanguageName}` : 'Translate to English';
                 resultEl.textContent = '';
             }
@@ -626,6 +647,7 @@ function showCurrentTask(sentence, isReview = false, isWordChal = false, challen
                 // Forward: show Spanish, expect English
                 wordEl.textContent = isReverseVocab ? item.translation : item.word;
                 inputEl.value = '';
+                inputEl.disabled = false;
                 inputEl.placeholder = isReverseVocab ? `Translate to ${currentLanguageName}` : 'Translate to English';
                 resultEl.textContent = '';
             }
@@ -699,6 +721,13 @@ function showValidationResult(result, studentTranslation) {
         elements.resultReason.textContent = result.evaluation;
     } else {
         elements.resultReasonRow.classList.add('hidden');
+    }
+
+    if (result.raw_ai_response) {
+        elements.resultRawAiRow.classList.remove('hidden');
+        elements.resultRawAi.textContent = result.raw_ai_response;
+    } else {
+        elements.resultRawAiRow.classList.add('hidden');
     }
 
     // Per-word results for multi-word challenges
@@ -861,8 +890,20 @@ async function showLearningModal() {
 }
 
 async function loadNextSentence() {
+    let hasSubmitResult = false;
+
+    // If we have a pending submit result, show it immediately as previous eval
+    if (lastSubmitResult) {
+        showResultInPreviousEval(lastSubmitResult.result, lastSubmitResult.studentTranslation);
+        lastSubmitResult = null;
+        hasSubmitResult = true;
+    }
+
+    // Show loading in task area
     elements.loading.classList.remove('hidden');
-    elements.loading.innerHTML = '<p>Loading story — this can take up to 30 seconds...</p>';
+    elements.loading.innerHTML = hasSubmitResult
+        ? '<p>Loading next...</p>'
+        : '<p>Loading story — this can take up to 30 seconds...</p>';
     elements.currentTask.classList.add('hidden');
     elements.validationResult.classList.add('hidden');
 
@@ -889,15 +930,20 @@ async function loadNextSentence() {
             renderStory(data.story, data.difficulty, data.sentence);
         }
 
-        // Show previous evaluation if any
-        if (data.has_previous_evaluation && data.previous_evaluation) {
-            showPreviousEvaluation(data.previous_evaluation);
-        } else {
-            elements.previousEval.classList.add('hidden');
+        // Show previous evaluation from server only if we didn't already show submit result
+        if (!hasSubmitResult) {
+            if (data.has_previous_evaluation && data.previous_evaluation) {
+                showPreviousEvaluation(data.previous_evaluation);
+            } else {
+                elements.previousEval.classList.add('hidden');
+            }
         }
 
         // Show current task
         showCurrentTask(data.sentence, data.is_review, data.is_word_challenge, data.challenge_word, data.is_vocab_challenge, data.vocab_challenge, data.is_verb_challenge, data.verb_challenge, data.is_synonym_challenge, data.synonym_challenge, data.is_weakwords_challenge, data.weakwords_challenge);
+
+        // Scroll to center between previous eval and current task
+        scrollToCenterOfComponents();
 
         // Update API stats
         updateApiStats();
@@ -906,6 +952,126 @@ async function loadNextSentence() {
         console.error('Error loading sentence:', error);
         elements.loading.innerHTML = `<p>Error loading: ${error.message || error}</p><p><button onclick="loadNextSentence()">Retry</button></p>`;
     }
+}
+
+function getCurrentChallengeType() {
+    if (isWeakwordsChallenge) return 'weakwords';
+    if (isVerbChallenge) return 'verb';
+    if (isSynonymChallenge) return 'synonym';
+    if (isVocabChallenge) return 'vocab';
+    if (isWordChallenge) return 'word';
+    return null;
+}
+
+function showResultInPreviousEval(result, studentTranslation) {
+    elements.previousEval.classList.remove('hidden');
+
+    // Challenge type indicator
+    const challengeType = getCurrentChallengeType();
+    if (challengeType) {
+        const challengeLabels = {
+            'word': 'Word Challenge',
+            'vocab': 'Vocabulary Quiz',
+            'verb': 'Verb Challenge',
+            'synonym': 'Synonym/Antonym Challenge',
+            'weakwords': 'Weakest Words'
+        };
+        elements.prevChallengeType.textContent = challengeLabels[challengeType] || '';
+        elements.prevChallengeType.classList.remove('hidden');
+        elements.prevSentenceLabel.textContent = 'Word:';
+    } else {
+        elements.prevChallengeType.classList.add('hidden');
+        elements.prevSentenceLabel.textContent = 'Sentence:';
+    }
+
+    elements.prevSentence.textContent = currentSentence;
+    elements.prevTranslation.textContent = studentTranslation;
+    elements.prevCorrect.textContent = result.correct_translation;
+    elements.prevScore.textContent = result.score;
+
+    // Score styling
+    elements.prevScore.className = '';
+    if (result.score >= 90) {
+        elements.prevScore.classList.add('score-excellent');
+    } else if (result.score >= 70) {
+        elements.prevScore.classList.add('score-good');
+    } else {
+        elements.prevScore.classList.add('score-poor');
+    }
+
+    if (result.evaluation && result.score < 100) {
+        elements.prevReasonRow.classList.remove('hidden');
+        elements.prevReason.textContent = result.evaluation;
+    } else {
+        elements.prevReasonRow.classList.add('hidden');
+    }
+
+    if (result.raw_ai_response) {
+        elements.prevRawAiRow.classList.remove('hidden');
+        elements.prevRawAi.textContent = result.raw_ai_response;
+    } else {
+        elements.prevRawAiRow.classList.add('hidden');
+    }
+
+    // Level change
+    if (result.level_changed) {
+        elements.prevLevelChange.classList.remove('hidden');
+        if (result.change_type === 'advanced') {
+            elements.prevLevelChange.className = 'level-change advanced';
+            elements.prevLevelChange.textContent = `Level Up! Now at Level ${result.new_level}`;
+        } else {
+            elements.prevLevelChange.className = 'level-change demoted';
+            elements.prevLevelChange.textContent = `Level Down. Now at Level ${result.new_level}`;
+        }
+    } else {
+        elements.prevLevelChange.classList.add('hidden');
+    }
+
+    // Word results for multi-word challenges
+    elements.prevWordResults.innerHTML = '';
+    if (result.word_results && result.word_results.length > 0) {
+        const grid = document.createElement('div');
+        grid.className = 'multi-result-grid';
+        result.word_results.forEach(wr => {
+            const item = document.createElement('div');
+            item.className = `multi-result-item ${wr.is_correct ? 'correct' : 'incorrect'}`;
+            const icon = wr.is_correct ? '\u2713' : '\u2717';
+            const iconColor = wr.is_correct ? '#2ecc71' : '#e74c3c';
+            let html = `<span class="multi-result-icon" style="color:${iconColor}">${icon}</span>`;
+            html += `<span class="multi-result-word">${wr.word}</span>`;
+            html += `<span class="multi-result-answer">${wr.student_answer || '(empty)'}</span>`;
+            if (!wr.is_correct) {
+                html += `<span class="multi-result-correct">\u2192 ${wr.correct_answer}</span>`;
+            }
+            item.innerHTML = html;
+            grid.appendChild(item);
+        });
+        elements.prevWordResults.appendChild(grid);
+    }
+
+    // No event ID from submit response
+    elements.prevEventId.classList.add('hidden');
+}
+
+function scrollToCenterOfComponents() {
+    requestAnimationFrame(() => {
+        const prevEval = elements.previousEval;
+        const taskSection = document.getElementById('task-section');
+
+        if (prevEval.classList.contains('hidden')) {
+            // No previous eval visible, just scroll task into view
+            taskSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+
+        const prevRect = prevEval.getBoundingClientRect();
+        const taskRect = taskSection.getBoundingClientRect();
+
+        // Midpoint between bottom of previous-eval and top of task-section
+        const midpoint = (prevRect.bottom + taskRect.top) / 2;
+        const scrollTarget = window.scrollY + midpoint - window.innerHeight / 2;
+        window.scrollTo({ top: Math.max(0, scrollTarget), behavior: 'smooth' });
+    });
 }
 
 async function handleSubmit(e) {
@@ -946,9 +1112,20 @@ async function handleSubmit(e) {
         }
     }
 
+    // Minimal UI change: disable inputs, show validating status
     elements.submitBtn.disabled = true;
     elements.submitBtn.textContent = 'Validating...';
-    elements.validationResult.style.display = 'none';
+    elements.translationInput.disabled = true;
+    if (isMultiVocab) {
+        const inputCount = isWeakwordsChallenge ? 6 : 4;
+        for (let i = 0; i < inputCount; i++) {
+            const input = document.getElementById(`multi-input-${i}`);
+            if (input) input.disabled = true;
+        }
+    }
+    // Clear any previous error display
+    elements.validationResult.classList.add('hidden');
+    elements.validationResult.style.display = '';
 
     try {
         const result = await submitTranslation(currentSentence, translation, selectedTense, translations);
@@ -957,18 +1134,28 @@ async function handleSubmit(e) {
         const status = await getStatus();
         updateStatusBar(status);
 
-        // Show result
-        showValidationResult(result, translation);
+        // Store result for immediate display as previous eval
+        lastSubmitResult = { result, studentTranslation: translation };
 
         // Update API stats
         updateApiStats();
+
+        // Load next sentence (shows result as previous eval + new task)
+        loadNextSentence();
 
     } catch (error) {
         console.error('Error submitting:', error);
         showSubmitError(error.message || 'Unknown error');
         elements.submitBtn.disabled = false;
-    } finally {
         elements.submitBtn.textContent = 'Submit';
+        elements.translationInput.disabled = false;
+        if (isMultiVocab) {
+            const inputCount = isWeakwordsChallenge ? 6 : 4;
+            for (let i = 0; i < inputCount; i++) {
+                const input = document.getElementById(`multi-input-${i}`);
+                if (input) input.disabled = false;
+            }
+        }
     }
 }
 

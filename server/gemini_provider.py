@@ -305,7 +305,7 @@ class GeminiProvider(AIProvider):
         self._record_stats('story', ms, token_stats)
         return (text, ms)
 
-    def validate_translation(self, sentence: str, translation: str, story_context: str = None, direction: str = 'normal', language_info: dict = None) -> tuple[dict, int]:
+    def validate_translation(self, sentence: str, translation: str, story_context: str = None, direction: str = 'normal', language_info: dict = None) -> tuple[dict, int, str]:
         lang = language_info or _DEFAULT_LANGUAGE_INFO
         lang_name = lang['english_name']
         context_block = ""
@@ -486,7 +486,7 @@ class GeminiProvider(AIProvider):
                 'evaluation': 'Error parsing AI response. Please try again.',
                 'vocabulary_breakdown': []
             }
-        return (judgement, ms)
+        return (judgement, ms, response)
 
     def get_hint(self, sentence: str, correct_words: list, direction: str = 'normal', partial_translation: str = '', language_info: dict = None) -> dict | None:
         lang = language_info or _DEFAULT_LANGUAGE_INFO

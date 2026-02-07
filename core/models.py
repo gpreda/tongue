@@ -22,6 +22,7 @@ class TongueRound:
         self.translation = None
         self.judgement = None
         self.evaluated = False
+        self.raw_ai_response = None
 
     def to_dict(self) -> dict:
         return {
@@ -31,7 +32,8 @@ class TongueRound:
             'judge_ms': self.judge_ms,
             'translation': self.translation,
             'judgement': self.judgement,
-            'evaluated': self.evaluated
+            'evaluated': self.evaluated,
+            'raw_ai_response': self.raw_ai_response
         }
 
     @classmethod
@@ -41,6 +43,7 @@ class TongueRound:
         round.translation = data.get('translation')
         round.judgement = data.get('judgement')
         round.evaluated = data.get('evaluated', False)
+        round.raw_ai_response = data.get('raw_ai_response')
         return round
 
     def get_score(self) -> int:
@@ -777,6 +780,10 @@ class History:
     def pick_challenge_type(self) -> str | None:
         """Decide whether this turn is a challenge and which category.
         Returns category name ('word', 'vocab', 'verb', 'synonym', 'weakwords') or None."""
+        # Every 5th round, force a weakwords challenge if eligible
+        round_num = len(self.rounds) + 1  # +1 for the upcoming round
+        if round_num % 5 == 0 and self.get_weakest_words(6) is not None:
+            return 'weakwords'
         if not self.is_challenge_turn():
             return None
         weights = self.get_challenge_category_weights()

@@ -199,6 +199,7 @@ class TranslationResponse(BaseModel):
     new_level: int
     change_type: Optional[str]
     word_results: Optional[list] = None  # Per-word results for multi-word vocab challenges
+    raw_ai_response: Optional[str] = None
 
 
 class HintResponse(BaseModel):
@@ -1217,7 +1218,8 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             'judge_ms': prev.judge_ms,
             'level_changed': history.last_level_changed,
             'challenge_type': prev_challenge_type,
-            'challenge_direction': prev_challenge_direction
+            'challenge_direction': prev_challenge_direction,
+            'raw_ai_response': getattr(prev, 'raw_ai_response', None)
         }
 
         # Log full previous result data for debugging
@@ -1233,6 +1235,7 @@ async def _get_next_sentence_inner(user_id: str = "default"):
             challenge_direction=prev_challenge_direction,
             direction=history.direction,
             full_judgement=prev.judgement,
+            raw_ai_response=getattr(prev, 'raw_ai_response', None),
         )
         if event_id:
             previous_eval['event_id'] = event_id
@@ -1386,6 +1389,8 @@ async def submit_translation(request: TranslationRequest):
                       task_type=challenge_type_str,
                       recorded=practice_recorded,
                       ms=int(practice_delta * 1000))
+
+        raw_ai_response = None
 
         if is_synonym_challenge:
             # Synonym/Antonym challenge
@@ -1873,7 +1878,7 @@ async def submit_translation(request: TranslationRequest):
                         detail=f"Please write your answer in {script_name} script."
                     )
 
-            judgement, judge_ms = ai_provider.validate_translation(
+            judgement, judge_ms, raw_ai_response = ai_provider.validate_translation(
                 current_round.sentence,
                 request.translation,
                 story_context=history.current_story,
@@ -1882,6 +1887,7 @@ async def submit_translation(request: TranslationRequest):
             )
 
         current_round.translation = request.translation
+        current_round.raw_ai_response = raw_ai_response
 
         # Challenges have separate scoring, don't affect level progress
         if is_verb_challenge or is_vocab_challenge or is_word_challenge or is_synonym_challenge or is_weakwords_challenge:
@@ -1973,6 +1979,7 @@ async def submit_translation(request: TranslationRequest):
         log_event('translation.result', request.user_id,
                   score=current_round.get_score(),
                   correct_translation=judgement.get('correct_translation', ''),
+                  raw_ai_response=raw_ai_response,
                   ms=judge_ms,
                   ai_used=True,
                   model_name=validate_ai.get('model_name'),
@@ -1994,7 +2001,8 @@ async def submit_translation(request: TranslationRequest):
             judge_ms=judge_ms,
             level_changed=level_info['level_changed'],
             new_level=level_info['new_level'],
-            change_type=level_info['change_type']
+            change_type=level_info['change_type'],
+            raw_ai_response=raw_ai_response
         )
     except HTTPException:
         raise

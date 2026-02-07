@@ -316,6 +316,30 @@ header h1 {
     margin-top: 4px;
 }
 
+.raw-ai-details {
+    margin-top: 8px;
+    font-size: 0.8rem;
+}
+
+.raw-ai-details summary {
+    cursor: pointer;
+    color: #888;
+    font-size: 0.75rem;
+}
+
+.raw-ai-pre {
+    background: #1a1a2e;
+    color: #ccc;
+    padding: 8px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 0.75rem;
+    margin-top: 4px;
+}
+
 /* Score colors for previous evaluation */
 .score-excellent {
     color: #2ecc71;
