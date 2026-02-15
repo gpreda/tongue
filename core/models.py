@@ -82,6 +82,8 @@ class History:
             'synonym': {'correct': 0, 'incorrect': 0},
             'weakwords': {'correct': 0, 'incorrect': 0}
         }
+        # Story bank: saves unfinished stories per difficulty level for resuming later
+        self._story_bank = {}  # difficulty (str) -> {current_story, story_sentences, story_difficulty, story_generate_ms}
         # Practice time tracking per language+direction key, e.g. {"es:normal": 120.5}
         self.practice_times = {}
         # Direction mode: 'normal' (ES→EN) or 'reverse' (EN→ES)
@@ -108,7 +110,7 @@ class History:
         'level_scores', 'total_completed', 'current_story', 'story_sentences',
         'story_difficulty', 'story_generate_ms', 'last_evaluated_round',
         'last_level_changed', 'review_queue', 'vocab_progress',
-        'vocab_progress_version', 'challenge_stats'
+        'vocab_progress_version', 'challenge_stats', '_story_bank'
     ]
 
     # Fields captured per-language (direction + reverse state + all progress)
@@ -209,6 +211,7 @@ class History:
             'story_difficulty': self.story_difficulty,
             'story_generate_ms': self.story_generate_ms,
             'review_queue': self.review_queue,
+            '_story_bank': self._story_bank,
             'vocab_progress': self.vocab_progress,
             'vocab_progress_version': self.vocab_progress_version,
             'challenge_stats': self.challenge_stats,
@@ -256,6 +259,7 @@ class History:
         history.story_difficulty = data.get('story_difficulty')
         history.story_generate_ms = data.get('story_generate_ms', 0)
         history.review_queue = data.get('review_queue', [])
+        history._story_bank = data.get('_story_bank', {})
         history.vocab_progress = data.get('vocab_progress', {})
         history.vocab_progress_version = data.get('vocab_progress_version', 1)
         # Migrate vocab_progress keys from Spanish to English if needed
@@ -449,8 +453,32 @@ class History:
                 return True
         return False
 
+    def save_story_to_bank(self) -> None:
+        """Save current story to bank before level change, if there are remaining sentences."""
+        if self.story_sentences and self.story_difficulty is not None:
+            key = str(self.story_difficulty)
+            self._story_bank[key] = {
+                'current_story': self.current_story,
+                'story_sentences': list(self.story_sentences),
+                'story_difficulty': self.story_difficulty,
+                'story_generate_ms': self.story_generate_ms
+            }
+
+    def load_story_from_bank(self, difficulty: int) -> bool:
+        """Restore story for a given difficulty from bank. Returns True if loaded."""
+        key = str(difficulty)
+        if key in self._story_bank:
+            entry = self._story_bank.pop(key)
+            self.current_story = entry['current_story']
+            self.story_sentences = entry['story_sentences']
+            self.story_difficulty = entry['story_difficulty']
+            self.story_generate_ms = entry['story_generate_ms']
+            return True
+        return False
+
     def advance_level(self) -> bool:
         if self.difficulty < MAX_DIFFICULTY:
+            self.save_story_to_bank()
             self.difficulty += 1
             self.level_scores = []
             self.story_sentences = []
@@ -464,6 +492,7 @@ class History:
 
     def demote_level(self) -> bool:
         if self.difficulty > MIN_DIFFICULTY:
+            self.save_story_to_bank()
             self.difficulty -= 1
             self.level_scores = []
             self.story_sentences = []

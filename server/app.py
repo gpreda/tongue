@@ -272,8 +272,13 @@ story_provider: GeminiProvider = None  # Pro model for story generation
 user_histories: dict[str, History] = {}
 
 # Background story generation
-pending_stories: dict[str, dict] = {}  # user_id -> {story, difficulty, ms, task}
+pending_stories: dict[str, dict[str, dict]] = {}  # user_id -> {cache_key -> story_data}
 story_generation_locks: dict[str, asyncio.Lock] = {}  # Prevent duplicate generations
+
+
+def _story_cache_key(difficulty: int, direction: str = 'normal') -> str:
+    """Build cache key for pending_stories."""
+    return f"{difficulty}:{direction}"
 
 # Session tracking
 user_sessions: dict[str, str] = {}  # user_id -> session_id
@@ -446,15 +451,14 @@ async def generate_story_background(user_id: str, correct_words: list, difficult
     if user_id not in story_generation_locks:
         story_generation_locks[user_id] = asyncio.Lock()
 
+    cache_key = _story_cache_key(difficulty, direction)
+
     async with story_generation_locks[user_id]:
         # Check if we already have a pending story at this difficulty and direction
-        if user_id in pending_stories:
-            pending = pending_stories[user_id]
-            if (pending.get('difficulty') == difficulty and
-                    pending.get('direction', 'normal') == direction and
-                    pending.get('story')):
-                logger.info(f"Story already pre-generated for {user_id} at difficulty {difficulty}")
-                return
+        user_cache = pending_stories.get(user_id, {})
+        if cache_key in user_cache and user_cache[cache_key].get('story'):
+            logger.info(f"Story already pre-generated for {user_id} at difficulty {difficulty}")
+            return
 
         logger.info(f"Background generating story for {user_id} at difficulty {difficulty} direction={direction}")
         try:
@@ -466,7 +470,9 @@ async def generate_story_background(user_id: str, correct_words: list, difficult
                 lambda: story_provider.generate_story(correct_words, difficulty, direction, language_info=li)
             )
             story_ai = story_provider.get_last_call_info()
-            pending_stories[user_id] = {
+            if user_id not in pending_stories:
+                pending_stories[user_id] = {}
+            pending_stories[user_id][cache_key] = {
                 'story': story,
                 'difficulty': difficulty,
                 'direction': direction,
@@ -478,40 +484,41 @@ async def generate_story_background(user_id: str, correct_words: list, difficult
             logger.info(f"Background story ready for {user_id}: {len(story)} chars, {ms}ms")
         except Exception as e:
             logger.error(f"Background story generation failed for {user_id}: {e}")
-            # Clear any partial state
-            pending_stories.pop(user_id, None)
+            # Clear the specific cache key if it exists
+            if user_id in pending_stories:
+                pending_stories[user_id].pop(cache_key, None)
 
 
 def get_pending_story(user_id: str, difficulty: int, direction: str = 'normal') -> tuple[str, int, dict] | None:
     """Get a pre-generated story if available and at the right difficulty and direction."""
-    if user_id in pending_stories:
-        pending = pending_stories[user_id]
-        if (pending.get('difficulty') == difficulty and
-                pending.get('direction', 'normal') == direction and
-                pending.get('story')):
-            story = pending['story']
-            ms = pending['ms']
-            ai_info = {
-                'model_name': pending.get('model_name'),
-                'model_tokens': pending.get('model_tokens'),
-                'model_ms': pending.get('model_ms')
-            }
-            # Clear the pending story
+    cache_key = _story_cache_key(difficulty, direction)
+    user_cache = pending_stories.get(user_id, {})
+    if cache_key in user_cache and user_cache[cache_key].get('story'):
+        pending = user_cache[cache_key]
+        story = pending['story']
+        ms = pending['ms']
+        ai_info = {
+            'model_name': pending.get('model_name'),
+            'model_tokens': pending.get('model_tokens'),
+            'model_ms': pending.get('model_ms')
+        }
+        # Clear this specific cache entry
+        del pending_stories[user_id][cache_key]
+        if not pending_stories[user_id]:
             del pending_stories[user_id]
-            logger.info(f"Using pre-generated story for {user_id}")
-            return (story, ms, ai_info)
+        logger.info(f"Using pre-generated story for {user_id}")
+        return (story, ms, ai_info)
     return None
 
 
 def trigger_background_story(user_id: str, history: History) -> None:
-    """Trigger background story generation for a user."""
-    # Only trigger if user might need a new story soon
-    # (less than 3 sentences remaining or no story)
-    if len(history.story_sentences) < 3 or history.needs_new_story():
-        lang_info = get_user_language_info(user_id)
-        asyncio.create_task(
-            generate_story_background(user_id, history.correct_words, history.difficulty, history.direction, language_info=lang_info)
-        )
+    """Trigger background story generation for a user.
+    Always triggers to ensure a next story is pre-loaded; the background
+    generator will skip if one already exists at the current difficulty+direction."""
+    lang_info = get_user_language_info(user_id)
+    asyncio.create_task(
+        generate_story_background(user_id, history.correct_words, history.difficulty, history.direction, language_info=lang_info)
+    )
 
 
 @app.on_event("startup")
@@ -670,7 +677,7 @@ async def switch_language(user_id: str = "default", language: str = "es"):
     history.switch_language(language)
     save_history(user_id)
 
-    # Clear pending stories (wrong language)
+    # Clear all pending stories for this user (wrong language)
     pending_stories.pop(user_id, None)
 
     # Trigger background story generation for new language
@@ -731,34 +738,42 @@ async def get_story(user_id: str = "default", force_new: bool = False):
     history = get_history(user_id)
 
     if force_new or history.needs_new_story():
-        lang_info = get_user_language_info(user_id)
-        # Try to use pre-generated story first
-        pending = get_pending_story(user_id, history.difficulty, history.direction)
-        from_cache = pending is not None
-        if pending:
-            story, ms, story_ai = pending
+        # First, try to restore from story bank (previously saved unfinished story at this level)
+        if not force_new and history.load_story_from_bank(history.difficulty):
+            save_history(user_id)
+            logger.info(f"Restored story from bank for {user_id} at difficulty {history.difficulty}")
+            log_event('story.restore_from_bank', user_id,
+                      difficulty=history.difficulty,
+                      sentence_count=len(history.story_sentences))
         else:
-            # Fall back to synchronous generation with story_provider (pro model)
-            loop = asyncio.get_event_loop()
-            direction = history.direction
-            li = lang_info
-            story, ms = await loop.run_in_executor(
-                None,
-                lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction, language_info=li)
-            )
-            story_ai = story_provider.get_last_call_info()
-        history.set_story(story, history.difficulty, ms)
-        save_history(user_id)
+            lang_info = get_user_language_info(user_id)
+            # Try to use pre-generated story first
+            pending = get_pending_story(user_id, history.difficulty, history.direction)
+            from_cache = pending is not None
+            if pending:
+                story, ms, story_ai = pending
+            else:
+                # Fall back to synchronous generation with story_provider (pro model)
+                loop = asyncio.get_event_loop()
+                direction = history.direction
+                li = lang_info
+                story, ms = await loop.run_in_executor(
+                    None,
+                    lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction, language_info=li)
+                )
+                story_ai = story_provider.get_last_call_info()
+            history.set_story(story, history.difficulty, ms)
+            save_history(user_id)
 
-        # Log story generation
-        log_event('story.generate', user_id,
-                  from_cache=from_cache,
-                  ms=ms,
-                  sentence_count=len(history.story_sentences),
-                  ai_used=True,
-                  model_name=story_ai.get('model_name'),
-                  model_tokens=story_ai.get('model_tokens'),
-                  model_ms=story_ai.get('model_ms'))
+            # Log story generation
+            log_event('story.generate', user_id,
+                      from_cache=from_cache,
+                      ms=ms,
+                      sentence_count=len(history.story_sentences),
+                      ai_used=True,
+                      model_name=story_ai.get('model_name'),
+                      model_tokens=story_ai.get('model_tokens'),
+                      model_ms=story_ai.get('model_ms'))
 
         # Trigger background generation for next story
         trigger_background_story(user_id, history)
@@ -1055,33 +1070,41 @@ async def _get_next_sentence_inner(user_id: str = "default"):
         if current_round is None:
             # Generate story if needed
             if history.needs_new_story():
-                # Try to use pre-generated story first
-                pending = get_pending_story(user_id, history.difficulty, history.direction)
-                from_cache = pending is not None
-                if pending:
-                    story, ms, story_ai = pending
+                # First, try to restore from story bank (previously saved unfinished story at this level)
+                if history.load_story_from_bank(history.difficulty):
+                    save_history(user_id)
+                    logger.info(f"Restored story from bank for {user_id} at difficulty {history.difficulty}")
+                    log_event('story.restore_from_bank', user_id,
+                              difficulty=history.difficulty,
+                              sentence_count=len(history.story_sentences))
                 else:
-                    # Fall back to synchronous generation with story_provider (pro model)
-                    loop = asyncio.get_event_loop()
-                    direction = history.direction
-                    li = lang_info
-                    story, ms = await loop.run_in_executor(
-                        None,
-                        lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction, language_info=li)
-                    )
-                    story_ai = story_provider.get_last_call_info()
-                history.set_story(story, history.difficulty, ms)
-                save_history(user_id)
+                    # Try to use pre-generated story first
+                    pending = get_pending_story(user_id, history.difficulty, history.direction)
+                    from_cache = pending is not None
+                    if pending:
+                        story, ms, story_ai = pending
+                    else:
+                        # Fall back to synchronous generation with story_provider (pro model)
+                        loop = asyncio.get_event_loop()
+                        direction = history.direction
+                        li = lang_info
+                        story, ms = await loop.run_in_executor(
+                            None,
+                            lambda: story_provider.generate_story(history.correct_words, history.difficulty, direction, language_info=li)
+                        )
+                        story_ai = story_provider.get_last_call_info()
+                    history.set_story(story, history.difficulty, ms)
+                    save_history(user_id)
 
-                # Log story generation
-                log_event('story.generate', user_id,
-                          from_cache=from_cache,
-                          ms=ms,
-                          sentence_count=len(history.story_sentences),
-                          ai_used=True,
-                          model_name=story_ai.get('model_name'),
-                          model_tokens=story_ai.get('model_tokens'),
-                          model_ms=story_ai.get('model_ms'))
+                    # Log story generation
+                    log_event('story.generate', user_id,
+                              from_cache=from_cache,
+                              ms=ms,
+                              sentence_count=len(history.story_sentences),
+                              ai_used=True,
+                              model_name=story_ai.get('model_name'),
+                              model_tokens=story_ai.get('model_tokens'),
+                              model_ms=story_ai.get('model_ms'))
 
             # Get next sentence
             current_round, is_review = history.get_next_sentence()
