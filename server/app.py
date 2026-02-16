@@ -418,7 +418,7 @@ app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 @app.get("/app")
 async def serve_app():
     """Serve the web application."""
-    return FileResponse(WEB_DIR / "index.html")
+    return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/logs")
