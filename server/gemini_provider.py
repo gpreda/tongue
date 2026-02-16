@@ -849,8 +849,23 @@ class GeminiProvider(AIProvider):
 
             Return ONLY the Python dictionary, no other text, no markdown formatting.
         """
+        response = None
         try:
-            response, ms, token_stats = self._execute_chat(prompt)
+            # Use a standalone generate call (not shared chat) to avoid
+            # context pollution from prior validation/hint conversations.
+            start_time = time.time()
+            raw = self.model.generate_content(prompt)
+            end_time = time.time()
+            ms = int((end_time - start_time) * 1000)
+
+            token_stats = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
+            if hasattr(raw, 'usage_metadata') and raw.usage_metadata:
+                metadata = raw.usage_metadata
+                token_stats['prompt_tokens'] = getattr(metadata, 'prompt_token_count', 0)
+                token_stats['completion_tokens'] = getattr(metadata, 'candidates_token_count', 0)
+                token_stats['total_tokens'] = getattr(metadata, 'total_token_count', 0)
+
+            response = raw.text
             self._record_stats('deep_analysis', ms, token_stats)
             sanitized = self._sanitize_judgement(response)
             result = ast.literal_eval(sanitized)
