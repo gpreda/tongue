@@ -220,6 +220,19 @@ class VerbHintResponse(BaseModel):
     base_verb: str
 
 
+class DeepAnalysisRequest(BaseModel):
+    sentence: str
+    user_id: str = "default"
+    model: str = "flash"  # "flash" or "pro"
+
+
+class DeepAnalysisResponse(BaseModel):
+    words: list
+    grammar: str
+    phrases: list
+    notes: str
+
+
 class StatusResponse(BaseModel):
     language: str
     language_code: str = 'es'
@@ -2102,6 +2115,54 @@ async def _get_hint_inner(request: HintRequest):
         adjective=hint.get('adjective'),
         adverb=hint.get('adverb')
     )
+
+
+@app.post("/api/deep-analysis", response_model=DeepAnalysisResponse)
+async def deep_analysis(request: DeepAnalysisRequest):
+    """Get a deep grammar and vocabulary analysis of a sentence."""
+    try:
+        start_time = time.time()
+        lang_info = get_user_language_info(request.user_id)
+        history = get_history(request.user_id)
+
+        provider = story_provider if request.model == 'pro' else ai_provider
+        result = provider.deep_analysis(
+            request.sentence,
+            direction=history.direction,
+            language_info=lang_info
+        )
+
+        ai_info = provider.get_last_call_info()
+        ms = int((time.time() - start_time) * 1000)
+        log_event('deep_analysis.request', request.user_id,
+                  sentence=request.sentence,
+                  direction=history.direction,
+                  ms=ms,
+                  ai_used=True,
+                  model_name=ai_info.get('model_name'),
+                  model_tokens=ai_info.get('model_tokens'),
+                  model_ms=ai_info.get('model_ms'))
+
+        if not result:
+            raise HTTPException(status_code=500, detail="Failed to generate deep analysis")
+
+        return DeepAnalysisResponse(
+            words=result.get('words', []),
+            grammar=result.get('grammar', ''),
+            phrases=result.get('phrases', []),
+            notes=result.get('notes', '')
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in deep_analysis: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        log_event('error.server', request.user_id,
+                  endpoint='/api/deep-analysis',
+                  error_type=type(e).__name__,
+                  error_message=str(e),
+                  traceback=traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
 @app.post("/api/verb-hint", response_model=VerbHintResponse)

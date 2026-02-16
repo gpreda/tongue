@@ -86,6 +86,9 @@ const elements = {
     prevWordResults: document.getElementById('prev-word-results'),
     prevLevelChange: document.getElementById('prev-level-change'),
     prevEventId: document.getElementById('prev-event-id'),
+    prevAnalysisBtn: document.getElementById('prev-analysis-btn'),
+    prevDeepAnalysisBtn: document.getElementById('prev-deep-analysis-btn'),
+    prevDeepAnalysis: document.getElementById('prev-deep-analysis'),
 
     loading: document.getElementById('loading'),
     currentTask: document.getElementById('current-task'),
@@ -318,6 +321,13 @@ async function getApiStats() {
     return api('/api/stats');
 }
 
+async function getDeepAnalysis(sentence, model = 'flash') {
+    return api('/api/deep-analysis', {
+        method: 'POST',
+        body: JSON.stringify({ sentence, user_id: currentUser, model })
+    });
+}
+
 async function updateApiStats() {
     try {
         const stats = await getApiStats();
@@ -496,6 +506,9 @@ function showPreviousEvaluation(eval_data) {
     // Clear word results and level change (only populated from direct submit)
     elements.prevWordResults.innerHTML = '';
     elements.prevLevelChange.classList.add('hidden');
+
+    // Reset deep analysis
+    resetDeepAnalysis();
 
     // Show event ID for debugging reference
     if (eval_data.event_id) {
@@ -1051,6 +1064,9 @@ function showResultInPreviousEval(result, studentTranslation) {
 
     // No event ID from submit response
     elements.prevEventId.classList.add('hidden');
+
+    // Reset deep analysis
+    resetDeepAnalysis();
 }
 
 function scrollToCenterOfComponents() {
@@ -1448,6 +1464,80 @@ function closeMenu() {
     elements.menuDropdown.classList.add('hidden');
 }
 
+function resetDeepAnalysis() {
+    elements.prevAnalysisBtn.disabled = false;
+    elements.prevAnalysisBtn.textContent = 'Analysis';
+    elements.prevDeepAnalysisBtn.disabled = false;
+    elements.prevDeepAnalysisBtn.textContent = 'Deep Analysis';
+    elements.prevDeepAnalysis.classList.add('hidden');
+    elements.prevDeepAnalysis.innerHTML = '';
+}
+
+function renderDeepAnalysis(data) {
+    let html = '';
+
+    // Word table
+    if (data.words && data.words.length > 0) {
+        html += '<div class="da-section"><h4>Words</h4><table class="da-word-table"><thead><tr><th>Word</th><th>Translation</th><th>Type</th><th>Context Meaning</th><th>Grammar</th></tr></thead><tbody>';
+        for (const w of data.words) {
+            html += `<tr><td class="da-word">${w.word || ''}</td><td>${w.translation || ''}</td><td class="da-pos">${w.part_of_speech || ''}</td><td>${w.context_meaning || ''}</td><td class="da-grammar">${w.grammar_notes || ''}</td></tr>`;
+            if (w.other_meanings) {
+                html += `<tr class="da-alt-row"><td colspan="5">Other meanings: ${w.other_meanings}</td></tr>`;
+            }
+        }
+        html += '</tbody></table></div>';
+    }
+
+    // Grammar section
+    if (data.grammar) {
+        html += `<div class="da-section"><h4>Grammar</h4><p>${data.grammar}</p></div>`;
+    }
+
+    // Phrases section
+    if (data.phrases && data.phrases.length > 0) {
+        html += '<div class="da-section"><h4>Phrases & Idioms</h4>';
+        for (const p of data.phrases) {
+            html += `<div class="da-phrase"><strong>${p.phrase || ''}</strong> — ${p.meaning || ''}<br><span class="da-explanation">${p.explanation || ''}</span></div>`;
+        }
+        html += '</div>';
+    }
+
+    // Notes section
+    if (data.notes) {
+        html += `<div class="da-section"><h4>Notes</h4><p>${data.notes}</p></div>`;
+    }
+
+    return html;
+}
+
+async function handleAnalysis(model) {
+    const sentence = elements.prevSentence.textContent;
+    if (!sentence) return;
+
+    const isDeep = model === 'pro';
+    const btn = isDeep ? elements.prevDeepAnalysisBtn : elements.prevAnalysisBtn;
+    const label = isDeep ? 'Deep Analysis' : 'Analysis';
+
+    // Disable both buttons during request
+    elements.prevAnalysisBtn.disabled = true;
+    elements.prevDeepAnalysisBtn.disabled = true;
+    btn.textContent = 'Analyzing...';
+    elements.prevDeepAnalysis.classList.remove('hidden');
+    elements.prevDeepAnalysis.innerHTML = '<p class="da-loading">Analyzing sentence...</p>';
+
+    try {
+        const data = await getDeepAnalysis(sentence, model);
+        elements.prevDeepAnalysis.innerHTML = renderDeepAnalysis(data);
+        btn.textContent = label;
+    } catch (error) {
+        console.error('Analysis error:', error);
+        elements.prevDeepAnalysis.innerHTML = '<p class="da-error">Failed to load analysis. Try again.</p>';
+        elements.prevAnalysisBtn.disabled = false;
+        elements.prevDeepAnalysisBtn.disabled = false;
+        btn.textContent = label;
+    }
+}
+
 // Event Listeners
 elements.startForm.addEventListener('submit', handleStartForm);
 elements.translationForm.addEventListener('submit', handleSubmit);
@@ -1461,6 +1551,8 @@ elements.switchLanguageBtn.addEventListener('click', () => { closeMenu(); handle
 elements.downgradeBtn.addEventListener('click', () => { closeMenu(); handleDowngrade(); });
 elements.resetStoryBtn.addEventListener('click', () => { closeMenu(); handleResetStory(); });
 elements.newGameBtn.addEventListener('click', () => { closeMenu(); handleNewGame(); });
+elements.prevAnalysisBtn.addEventListener('click', () => handleAnalysis('flash'));
+elements.prevDeepAnalysisBtn.addEventListener('click', () => handleAnalysis('pro'));
 
 // Enter-key navigation for multi-word inputs (6 cards for weakwords, 4 for vocab)
 for (let i = 0; i < 6; i++) {

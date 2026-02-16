@@ -316,6 +316,95 @@ header h1 {
     margin-top: 4px;
 }
 
+.deep-analysis-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.deep-analysis-btn {
+    font-size: 0.85rem;
+    padding: 8px 16px;
+}
+
+.deep-analysis-content {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.da-section {
+    margin-bottom: 14px;
+}
+
+.da-section h4 {
+    margin: 0 0 6px 0;
+    color: #4fc3f7;
+    font-size: 0.9rem;
+}
+
+.da-word-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 4px;
+}
+
+.da-word-table th,
+.da-word-table td {
+    padding: 4px 8px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.da-word-table th {
+    color: #aaa;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+}
+
+.da-word {
+    font-weight: bold;
+    color: #e0e0e0;
+}
+
+.da-pos {
+    color: #aaa;
+    font-style: italic;
+}
+
+.da-grammar {
+    color: #bbb;
+    font-size: 0.8rem;
+}
+
+.da-alt-row td {
+    padding: 2px 8px 6px;
+    color: #999;
+    font-size: 0.8rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.da-phrase {
+    margin-bottom: 8px;
+}
+
+.da-explanation {
+    color: #aaa;
+    font-size: 0.8rem;
+}
+
+.da-loading, .da-error {
+    color: #aaa;
+    font-style: italic;
+}
+
+.da-error {
+    color: #e74c3c;
+}
+
 .raw-ai-details {
     margin-top: 8px;
     font-size: 0.8rem;

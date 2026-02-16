@@ -44,7 +44,8 @@ class GeminiProvider(AIProvider):
             'validate': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
             'hint': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
             'word_translation': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
-            'verb_analysis': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
+            'verb_analysis': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+            'deep_analysis': {'calls': 0, 'total_ms': 0, 'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
         }
 
         # Load stats from storage or use defaults
@@ -132,9 +133,21 @@ class GeminiProvider(AIProvider):
         return (response.text, ms, token_stats)
 
     def _sanitize_judgement(self, judgement: str) -> str:
-        s = judgement[judgement.find('{'):judgement.rfind('}')+1]
+        # Strip markdown code fences (e.g. ```python ... ```)
+        s = judgement.strip()
+        if s.startswith('```'):
+            first_newline = s.find('\n')
+            if first_newline != -1:
+                s = s[first_newline + 1:]
+            if s.endswith('```'):
+                s = s[:-3]
+        s = s[s.find('{'):s.rfind('}')+1]
         s = s.replace('false', 'False')
         s = s.replace('true', 'True')
+        s = s.replace(': null', ': None')
+        s = s.replace(', null', ', None')
+        s = s.replace(',null', ',None')
+        s = s.replace('[null', '[None')
         return s
 
     def _get_difficulty_description(self, difficulty: int, lang_name: str, is_reverse: bool = False) -> str:
@@ -792,6 +805,71 @@ class GeminiProvider(AIProvider):
         except Exception as e:
             logger.error(f"Failed to validate synonym/antonym: {e}")
         return {'correct': False, 'explanation': 'Could not evaluate'}
+
+    def deep_analysis(self, sentence: str, direction: str = 'normal', language_info: dict = None) -> dict | None:
+        """Provide a deep grammar and vocabulary analysis of a sentence.
+        Returns dict with words, grammar, phrases, notes or None on error."""
+        lang = language_info or _DEFAULT_LANGUAGE_INFO
+        lang_name = lang['english_name']
+
+        if direction == 'reverse':
+            sentence_language = 'English'
+            target_language = lang_name
+        else:
+            sentence_language = lang_name
+            target_language = 'English'
+
+        prompt = f"""
+            Analyze this {sentence_language} sentence in detail for a language learner:
+
+            Sentence: "{sentence}"
+
+            Provide a comprehensive breakdown as a Python dictionary with these keys:
+
+            'words': A list of dictionaries, one for each meaningful word in the sentence. Each dict has:
+              - 'word': the word as it appears in the sentence
+              - 'translation': its {target_language} translation in this context
+              - 'context_meaning': what it means specifically in this sentence
+              - 'other_meanings': other common meanings (comma-separated string, or empty string)
+              - 'part_of_speech': noun, verb, adjective, adverb, preposition, conjunction, article, pronoun, etc.
+              - 'grammar_notes': any relevant grammar info (conjugation, gender, number, case, etc.)
+
+            'grammar': A string explaining the overall sentence structure and grammar patterns used.
+              Explain tense, mood, clause structure, and any notable grammatical constructions.
+
+            'phrases': A list of dictionaries for idioms, collocations, or multi-word constructs:
+              - 'phrase': the multi-word expression
+              - 'meaning': its meaning in {target_language}
+              - 'explanation': why it works this way / cultural context
+              If there are no notable phrases, use an empty list.
+
+            'notes': A string with any additional useful information for a learner
+              (common mistakes, similar words to watch out for, cultural context, etc.)
+              Use empty string if nothing notable.
+
+            Return ONLY the Python dictionary, no other text, no markdown formatting.
+        """
+        try:
+            response, ms, token_stats = self._execute_chat(prompt)
+            self._record_stats('deep_analysis', ms, token_stats)
+            sanitized = self._sanitize_judgement(response)
+            result = ast.literal_eval(sanitized)
+
+            if not isinstance(result, dict):
+                logger.warning(f"Deep analysis response is not a dict: {type(result)}")
+                return None
+
+            # Ensure required keys exist with defaults
+            result.setdefault('words', [])
+            result.setdefault('grammar', '')
+            result.setdefault('phrases', [])
+            result.setdefault('notes', '')
+
+            return result
+        except Exception as e:
+            logger.error(f"Failed to parse deep analysis: {e}")
+            logger.error(f"Raw response:\n{response}")
+            return None
 
     def generate_conjugation_rules(self, tense: str, language_info: dict = None) -> str | None:
         """Generate a concise conjugation rules summary for a tense in the target language.
