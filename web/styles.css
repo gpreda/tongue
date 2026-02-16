@@ -346,27 +346,13 @@ header h1 {
     font-size: 0.9rem;
 }
 
-.da-word-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 4px;
-}
-
-.da-word-table th,
-.da-word-table td {
-    padding: 4px 8px;
-    text-align: left;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.da-word-table th {
-    color: #aaa;
-    font-size: 0.75rem;
-    text-transform: uppercase;
+.da-word-entry {
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .da-word {
-    font-weight: bold;
     color: #e0e0e0;
 }
 
@@ -377,14 +363,10 @@ header h1 {
 
 .da-grammar {
     color: #bbb;
-    font-size: 0.8rem;
 }
 
-.da-alt-row td {
-    padding: 2px 8px 6px;
+.da-alt {
     color: #999;
-    font-size: 0.8rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .da-phrase {

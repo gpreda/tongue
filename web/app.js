@@ -1476,16 +1476,23 @@ function resetDeepAnalysis() {
 function renderDeepAnalysis(data) {
     let html = '';
 
-    // Word table
+    // Words list
     if (data.words && data.words.length > 0) {
-        html += '<div class="da-section"><h4>Words</h4><table class="da-word-table"><thead><tr><th>Word</th><th>Translation</th><th>Type</th><th>Context Meaning</th><th>Grammar</th></tr></thead><tbody>';
+        html += '<div class="da-section"><h4>Words</h4>';
         for (const w of data.words) {
-            html += `<tr><td class="da-word">${w.word || ''}</td><td>${w.translation || ''}</td><td class="da-pos">${w.part_of_speech || ''}</td><td>${w.context_meaning || ''}</td><td class="da-grammar">${w.grammar_notes || ''}</td></tr>`;
-            if (w.other_meanings) {
-                html += `<tr class="da-alt-row"><td colspan="5">Other meanings: ${w.other_meanings}</td></tr>`;
+            html += `<div class="da-word-entry"><strong class="da-word">${w.word || ''}</strong> <span class="da-pos">(${w.part_of_speech || ''})</span> — ${w.translation || ''}`;
+            if (w.context_meaning && w.context_meaning !== w.translation) {
+                html += `. ${w.context_meaning}`;
             }
+            if (w.grammar_notes) {
+                html += `. <span class="da-grammar">${w.grammar_notes}</span>`;
+            }
+            if (w.other_meanings) {
+                html += `. <span class="da-alt">Also: ${w.other_meanings}</span>`;
+            }
+            html += '</div>';
         }
-        html += '</tbody></table></div>';
+        html += '</div>';
     }
 
     // Grammar section
