@@ -88,7 +88,8 @@ const elements = {
     prevEventId: document.getElementById('prev-event-id'),
     prevAnalysisBtn: document.getElementById('prev-analysis-btn'),
     prevDeepAnalysisBtn: document.getElementById('prev-deep-analysis-btn'),
-    prevDeepAnalysis: document.getElementById('prev-deep-analysis'),
+    prevAnalysisContent: document.getElementById('prev-analysis-content'),
+    prevDeepAnalysisContent: document.getElementById('prev-deep-analysis-content'),
 
     loading: document.getElementById('loading'),
     currentTask: document.getElementById('current-task'),
@@ -1469,8 +1470,12 @@ function resetDeepAnalysis() {
     elements.prevAnalysisBtn.textContent = 'Analysis';
     elements.prevDeepAnalysisBtn.disabled = false;
     elements.prevDeepAnalysisBtn.textContent = 'Deep Analysis';
-    elements.prevDeepAnalysis.classList.add('hidden');
-    elements.prevDeepAnalysis.innerHTML = '';
+    elements.prevAnalysisContent.classList.add('hidden');
+    elements.prevAnalysisContent.innerHTML = '';
+    delete elements.prevAnalysisContent.dataset.loaded;
+    elements.prevDeepAnalysisContent.classList.add('hidden');
+    elements.prevDeepAnalysisContent.innerHTML = '';
+    delete elements.prevDeepAnalysisContent.dataset.loaded;
 }
 
 function renderDeepAnalysis(data) {
@@ -1523,25 +1528,33 @@ async function handleAnalysis(model) {
 
     const isDeep = model === 'pro';
     const btn = isDeep ? elements.prevDeepAnalysisBtn : elements.prevAnalysisBtn;
+    const section = isDeep ? elements.prevDeepAnalysisContent : elements.prevAnalysisContent;
+    const otherSection = isDeep ? elements.prevAnalysisContent : elements.prevDeepAnalysisContent;
     const label = isDeep ? 'Deep Analysis' : 'Analysis';
 
-    // Disable both buttons during request
-    elements.prevAnalysisBtn.disabled = true;
-    elements.prevDeepAnalysisBtn.disabled = true;
+    // Hide the other section, show this one
+    otherSection.classList.add('hidden');
+    section.classList.remove('hidden');
+
+    // If already loaded, just toggle visibility
+    if (section.dataset.loaded) return;
+
+    // Load content
+    btn.disabled = true;
     btn.textContent = 'Analyzing...';
-    elements.prevDeepAnalysis.classList.remove('hidden');
-    elements.prevDeepAnalysis.innerHTML = '<p class="da-loading">Analyzing sentence...</p>';
+    section.innerHTML = '<p class="da-loading">Analyzing sentence...</p>';
 
     try {
         const data = await getDeepAnalysis(sentence, model);
-        elements.prevDeepAnalysis.innerHTML = renderDeepAnalysis(data);
+        section.innerHTML = renderDeepAnalysis(data);
+        section.dataset.loaded = '1';
         btn.textContent = label;
+        btn.disabled = false;
     } catch (error) {
         console.error('Analysis error:', error);
-        elements.prevDeepAnalysis.innerHTML = '<p class="da-error">Failed to load analysis. Try again.</p>';
-        elements.prevAnalysisBtn.disabled = false;
-        elements.prevDeepAnalysisBtn.disabled = false;
+        section.innerHTML = '<p class="da-error">Failed to load analysis. Try again.</p>';
         btn.textContent = label;
+        btn.disabled = false;
     }
 }
 
