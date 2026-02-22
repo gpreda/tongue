@@ -423,9 +423,9 @@ class GeminiProvider(AIProvider):
                   left untranslated, or omitted entirely.
                   IMPORTANT: Check the actual {target_language} word the student used, not just sentence meaning.
 
-            'correct_translation': A proper {target_language} translation of the sentence.
-              If the student's translation is correct, you may use their translation.
-              If the score is less than 100, show a translation that demonstrates what was missed or wrong.
+            'correct_translation': An ideal {target_language} translation of the {source_language} sentence,
+              generated independently from the student's answer — do NOT anchor to or copy from the student's wording.
+              Translate directly from the source sentence as an expert translator would.
 
             'score': Integer 1-100. Base it on:
               - What percentage of words were correctly translated
@@ -819,6 +819,15 @@ class GeminiProvider(AIProvider):
             sentence_language = lang_name
             target_language = 'English'
 
+        is_romance = lang.get('code', '').split('-')[0] in (
+            'es', 'fr', 'it', 'pt', 'ro', 'ca', 'gl', 'oc',
+        )
+        etymology_instruction = ""
+        if is_romance:
+            etymology_instruction = """
+              - 'latin_origin': the Latin word this derives from (empty string if unknown or not from Latin)
+              - 'english_cognate': an English word sharing the same Latin origin, if one exists (empty string otherwise)"""
+
         prompt = f"""
             Analyze this {sentence_language} sentence in detail for a language learner:
 
@@ -832,7 +841,7 @@ class GeminiProvider(AIProvider):
               - 'context_meaning': what it means specifically in this sentence
               - 'other_meanings': other common meanings (comma-separated string, or empty string)
               - 'part_of_speech': noun, verb, adjective, adverb, preposition, conjunction, article, pronoun, etc.
-              - 'grammar_notes': any relevant grammar info (conjugation, gender, number, case, etc.)
+              - 'grammar_notes': any relevant grammar info (conjugation, gender, number, case, etc.){etymology_instruction}
 
             'grammar': A string explaining the overall sentence structure and grammar patterns used.
               Explain tense, mood, clause structure, and any notable grammatical constructions.
