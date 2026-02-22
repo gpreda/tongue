@@ -61,27 +61,38 @@ header h1 {
     margin-bottom: 25px;
 }
 
-.pin-hint {
-    font-size: 0.85rem;
-    color: #6c757d;
-    margin-bottom: 15px !important;
-}
-
-#start-form {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-}
-
-#username-input,
-#pin-input {
-    padding: 15px;
-    font-size: 1.1rem;
-    border: 2px solid rgba(255, 255, 255, 0.1);
+.google-signin-btn {
+    display: inline-block;
+    padding: 14px 28px;
+    background: #fff;
+    color: #444;
+    font-size: 1rem;
+    font-weight: 600;
     border-radius: 8px;
-    background: rgba(0, 0, 0, 0.2);
-    color: #fff;
-    text-align: center;
+    text-decoration: none;
+    margin-top: 10px;
+    transition: background 0.2s, box-shadow 0.2s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.google-signin-btn:hover {
+    background: #f0f0f0;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+.menu-signout-link {
+    display: block;
+    padding: 10px 15px;
+    color: #e94560;
+    text-decoration: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-top: 4px;
+}
+
+.menu-signout-link:hover {
+    background: rgba(233, 69, 96, 0.1);
 }
 
 #username-input:focus,
@@ -367,6 +378,10 @@ header h1 {
 
 .da-alt {
     color: #999;
+}
+
+.da-etymology {
+    color: #b8860b;
 }
 
 .da-phrase {

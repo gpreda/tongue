@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tongue - Translation Practice</title>
-    <link rel="stylesheet" href="/static/styles.css?v=5">
+    <link rel="stylesheet" href="/static/styles.css?v=6">
 </head>
 <body>
     <div class="container">
@@ -17,17 +17,8 @@
         <div id="start-screen" class="start-screen">
             <div class="start-content">
                 <h2>Welcome!</h2>
-                <p>Enter your name and 4-digit PIN to start or continue your practice:</p>
-                <p class="pin-hint">New user? Pick any 4-digit PIN — it will become your password.</p>
-                <form id="start-form">
-                    <input type="text" id="username-input" placeholder="Your name..." autocomplete="off" maxlength="30" required>
-                    <input type="password" id="pin-input" placeholder="4-digit PIN..." autocomplete="off" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" required>
-                    <select id="language-select" class="language-select">
-                        <option value="es">Spanish</option>
-                    </select>
-                    <div id="username-error" class="error-message hidden"></div>
-                    <button type="submit" id="start-btn" class="btn-primary">Start Practice</button>
-                </form>
+                <p>Sign in with your Google account to start or continue your practice.</p>
+                <a href="/login" class="google-signin-btn">Sign in with Google</a>
             </div>
         </div>
 
@@ -55,6 +46,7 @@
                             <button id="downgrade-btn">Downgrade Level</button>
                             <button id="reset-story-btn">New Story</button>
                             <button id="new-game-btn">New Game</button>
+                            <a href="/logout" class="menu-signout-link">Sign Out</a>
                         </div>
                     </div>
                 </div>
@@ -277,6 +269,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=6"></script>
+    <script src="/static/app.js?v=8"></script>
 </body>
 </html>

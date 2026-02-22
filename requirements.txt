@@ -4,6 +4,8 @@ uvicorn[standard]>=0.24.0
 pydantic>=2.0.0
 google-generativeai>=0.3.0
 psycopg2-binary>=2.9.0
+authlib>=1.3.0
+itsdangerous>=2.1.0
 
 # Client dependencies
 requests>=2.31.0

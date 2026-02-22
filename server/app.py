@@ -11,12 +11,14 @@ import unicodedata
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional
+from authlib.integrations.starlette_client import OAuth
+from starlette.middleware.sessions import SessionMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +152,6 @@ def get_accent_words_set(language_info: dict) -> set:
 class TranslationRequest(BaseModel):
     sentence: str
     translation: str
-    user_id: str = "default"
     hint_used: bool = False
     hint_words: list[str] = []
     selected_tense: Optional[str] = None  # For verb challenges
@@ -159,17 +160,7 @@ class TranslationRequest(BaseModel):
 
 class HintRequest(BaseModel):
     sentence: str
-    user_id: str = "default"
     partial_translation: str = ""
-
-
-class CreateUserRequest(BaseModel):
-    pin: str
-    language: str = 'es'
-
-
-class LoginRequest(BaseModel):
-    pin: str
 
 
 class ErrorLogRequest(BaseModel):
@@ -211,7 +202,6 @@ class HintResponse(BaseModel):
 
 class VerbHintRequest(BaseModel):
     sentence: str
-    user_id: str = "default"
 
 
 class VerbHintResponse(BaseModel):
@@ -222,7 +212,6 @@ class VerbHintResponse(BaseModel):
 
 class DeepAnalysisRequest(BaseModel):
     sentence: str
-    user_id: str = "default"
     model: str = "flash"  # "flash" or "pro"
 
 
@@ -397,7 +386,30 @@ def log_event(event: str, user_id: str, **data) -> int | None:
     return None
 
 
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+SESSION_SECRET_KEY = os.environ.get("SESSION_SECRET_KEY", "change-me-in-production")
+
+oauth = OAuth()
+oauth.register(
+    name="google",
+    client_id=GOOGLE_CLIENT_ID,
+    client_secret=GOOGLE_CLIENT_SECRET,
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
+
+
+def get_current_user(request: Request) -> str:
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user_id
+
+
 app = FastAPI(title="Tongue API", description="Multi-language translation practice API")
+
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET_KEY)
 
 app.add_middleware(
     CORSMiddleware,
@@ -431,6 +443,49 @@ async def serve_logs():
 async def serve_perf():
     """Serve the performance stats page."""
     return FileResponse(WEB_DIR / "perf.html")
+
+
+@app.exception_handler(401)
+async def unauthorized_handler(request: Request, exc):
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    return RedirectResponse(url="/login", status_code=303)
+
+
+@app.get("/login")
+async def login(request: Request):
+    redirect_uri = request.url_for("auth_callback")
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/callback", name="auth_callback")
+async def auth_callback(request: Request):
+    token = await oauth.google.authorize_access_token(request)
+    userinfo = token["userinfo"]
+    email = userinfo["email"]
+    request.session["user_id"] = email
+    if not storage.user_exists(email):
+        history = History(language=DEFAULT_LANGUAGE)
+        storage.save_state(history.to_dict(), email)
+        user_histories[email] = history
+        log_event("user.create", email)
+    else:
+        log_event("user.login", email)
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.get("/api/me")
+async def get_me(request: Request):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"user_id": None}, status_code=401)
+    return {"user_id": user_id}
 
 
 def get_history(user_id: str = "default") -> History:
@@ -596,76 +651,6 @@ async def list_users():
     return {"users": users}
 
 
-@app.get("/api/users/{user_id}/exists")
-async def check_user_exists(user_id: str):
-    """Check if a user exists."""
-    user_id = user_id.lower()
-    exists = storage.user_exists(user_id)
-    return {"exists": exists}
-
-
-@app.post("/api/users/{user_id}")
-async def create_user(user_id: str, request: CreateUserRequest):
-    """Create a new user with a PIN. Returns error if user already exists."""
-    user_id = user_id.lower()
-    if storage.user_exists(user_id):
-        return {"success": False, "error": "User already exists"}
-
-    # Validate PIN is 4 digits
-    if not request.pin or len(request.pin) != 4 or not request.pin.isdigit():
-        return {"success": False, "error": "PIN must be exactly 4 digits"}
-
-    # Create empty history for new user with selected language
-    history = History()
-    lang_code = request.language or DEFAULT_LANGUAGE
-    # Validate language exists
-    lang_info = get_language_info(lang_code)
-    if lang_info:
-        history.language = lang_code
-    else:
-        history.language = DEFAULT_LANGUAGE
-    user_histories[user_id] = history
-    save_history(user_id)
-
-    # Save the PIN
-    storage.save_pin(user_id, request.pin)
-
-    # Log user creation and start new session
-    session_id = new_session(user_id)
-    log_event('user.create', user_id, language=history.language)
-
-    return {"success": True, "user_id": user_id}
-
-
-@app.post("/api/users/{user_id}/login")
-async def login_user(user_id: str, request: LoginRequest):
-    """Login an existing user with PIN verification."""
-    user_id = user_id.lower()
-    if not storage.user_exists(user_id):
-        return {"success": False, "error": "User not found"}
-
-    # Check if user has a PIN set
-    existing_pin = storage.get_pin_hash(user_id)
-
-    if not existing_pin:
-        # Legacy user without PIN - set their PIN now
-        storage.save_pin(user_id, request.pin)
-        session_id = new_session(user_id)
-        log_event('user.login', user_id, is_legacy=True)
-        return {"success": True, "user_id": user_id}
-
-    # Verify PIN
-    if not storage.verify_pin(user_id, request.pin):
-        return {
-            "success": False,
-            "error": "User name already exists. Please enter the correct PIN or choose a different name to start a new game."
-        }
-
-    # Start new session on successful login
-    session_id = new_session(user_id)
-    log_event('user.login', user_id)
-
-    return {"success": True, "user_id": user_id}
 
 
 @app.get("/api/languages")
@@ -676,7 +661,7 @@ async def list_languages():
 
 
 @app.post("/api/switch-language")
-async def switch_language(user_id: str = "default", language: str = "es"):
+async def switch_language(user_id: str = Depends(get_current_user), language: str = "es"):
     """Switch user's active language."""
     user_id = user_id.lower()
     history = get_history(user_id)
@@ -704,7 +689,7 @@ async def switch_language(user_id: str = "default", language: str = "es"):
 
 
 @app.get("/api/status", response_model=StatusResponse)
-async def get_status(user_id: str = "default"):
+async def get_status(user_id: str = Depends(get_current_user)):
     """Get user status and progress."""
     try:
         history = get_history(user_id)
@@ -746,7 +731,7 @@ async def get_status(user_id: str = "default"):
 
 
 @app.get("/api/story", response_model=StoryResponse)
-async def get_story(user_id: str = "default", force_new: bool = False):
+async def get_story(user_id: str = Depends(get_current_user), force_new: bool = False):
     """Get current story or generate a new one."""
     history = get_history(user_id)
 
@@ -806,7 +791,7 @@ async def get_story(user_id: str = "default", force_new: bool = False):
 
 
 @app.get("/api/next", response_model=NextSentenceResponse)
-async def get_next_sentence(user_id: str = "default"):
+async def get_next_sentence(user_id: str = Depends(get_current_user)):
     """Get the next sentence, word challenge, vocab challenge, or verb challenge."""
     try:
         return await _get_next_sentence_inner(user_id)
@@ -1381,16 +1366,16 @@ async def _get_next_sentence_inner(user_id: str = "default"):
 
 
 @app.post("/api/translate", response_model=TranslationResponse)
-async def submit_translation(request: TranslationRequest):
+async def submit_translation(request: TranslationRequest, user_id: str = Depends(get_current_user)):
     """Submit a translation for evaluation."""
     import logging
     logger = logging.getLogger(__name__)
     start_time = time.time()
 
     try:
-        history = get_history(request.user_id)
+        history = get_history(user_id)
         lang_code = history.language
-        lang_info = get_user_language_info(request.user_id)
+        lang_info = get_user_language_info(user_id)
         accent_set = get_accent_words_set(lang_info)
         script = lang_info.get('script', 'latin')
 
@@ -1415,12 +1400,12 @@ async def submit_translation(request: TranslationRequest):
         is_weakwords_challenge = current_round.sentence.startswith("WEAK6:")
 
         # Calculate and record practice time
-        practice_delta = get_practice_delta(request.user_id)
+        practice_delta = get_practice_delta(user_id)
         if practice_delta is not None:
             practice_recorded = history.record_practice_time(practice_delta)
             # Log practice time event
             challenge_type_str = 'weakwords' if is_weakwords_challenge else ('verb' if is_verb_challenge else ('synonym' if is_synonym_challenge else ('vocab' if is_vocab_challenge else ('word' if is_word_challenge else 'sentence'))))
-            log_event('practice_time.delta', request.user_id,
+            log_event('practice_time.delta', user_id,
                       delta_seconds=round(practice_delta, 2),
                       task_type=challenge_type_str,
                       recorded=practice_recorded,
@@ -1966,17 +1951,17 @@ async def submit_translation(request: TranslationRequest):
             history.last_evaluated_round = current_round
             history.last_level_changed = False
 
-            save_history(request.user_id)
+            save_history(user_id)
 
             # Log translation submission and result for challenges
             ms = int((time.time() - start_time) * 1000)
-            log_event('translation.submit', request.user_id,
+            log_event('translation.submit', user_id,
                       sentence=request.sentence,
                       translation=request.translation,
                       challenge_type=challenge_type,
                       hint_used=request.hint_used,
                       ms=ms)
-            log_event('translation.result', request.user_id,
+            log_event('translation.result', user_id,
                       score=current_round.get_score(),
                       challenge_type=challenge_type,
                       correct_translation=judgement.get('correct_translation', ''),
@@ -2001,18 +1986,18 @@ async def submit_translation(request: TranslationRequest):
 
         # Regular sentences affect level progress
         level_info = history.process_evaluation(judgement, judge_ms, current_round, request.hint_words, request.hint_used)
-        save_history(request.user_id)
+        save_history(user_id)
 
         # Log translation submission and result
         ms = int((time.time() - start_time) * 1000)
-        log_event('translation.submit', request.user_id,
+        log_event('translation.submit', user_id,
                   sentence=request.sentence,
                   translation=request.translation,
                   hint_used=request.hint_used,
                   hint_words=request.hint_words,
                   ms=ms)
         validate_ai = ai_provider.get_last_call_info()
-        log_event('translation.result', request.user_id,
+        log_event('translation.result', user_id,
                   score=current_round.get_score(),
                   correct_translation=judgement.get('correct_translation', ''),
                   raw_ai_response=raw_ai_response,
@@ -2024,7 +2009,7 @@ async def submit_translation(request: TranslationRequest):
 
         # Log level change if it occurred
         if level_info['level_changed']:
-            log_event('level.change', request.user_id,
+            log_event('level.change', user_id,
                       old_level=level_info['new_level'] - 1 if level_info['change_type'] == 'up' else level_info['new_level'] + 1,
                       new_level=level_info['new_level'],
                       direction=level_info['change_type'])
@@ -2045,7 +2030,7 @@ async def submit_translation(request: TranslationRequest):
     except Exception as e:
         logger.error(f"Error in submit_translation: {type(e).__name__}: {e}")
         logger.error(traceback.format_exc())
-        log_event('error.server', request.user_id,
+        log_event('error.server', user_id,
                   endpoint='/api/translate',
                   error_type=type(e).__name__,
                   error_message=str(e),
@@ -2054,16 +2039,16 @@ async def submit_translation(request: TranslationRequest):
 
 
 @app.post("/api/hint", response_model=HintResponse)
-async def get_hint(request: HintRequest):
+async def get_hint(request: HintRequest, user_id: str = Depends(get_current_user)):
     """Get a hint for the current sentence."""
     try:
-        return await _get_hint_inner(request)
+        return await _get_hint_inner(request, user_id)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in get_hint: {type(e).__name__}: {e}")
         logger.error(traceback.format_exc())
-        log_event('error.server', request.user_id,
+        log_event('error.server', user_id,
                   endpoint='/api/hint',
                   error_type=type(e).__name__,
                   error_message=str(e),
@@ -2071,11 +2056,11 @@ async def get_hint(request: HintRequest):
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
-async def _get_hint_inner(request: HintRequest):
+async def _get_hint_inner(request: HintRequest, user_id: str):
     start_time = time.time()
-    history = get_history(request.user_id)
+    history = get_history(user_id)
 
-    lang_info = get_user_language_info(request.user_id)
+    lang_info = get_user_language_info(user_id)
     hint = ai_provider.get_hint(request.sentence, history.correct_words, direction=history.direction, partial_translation=request.partial_translation, language_info=lang_info)
 
     # Sanitize hint entries: discard arrays with null/None/"null" values
@@ -2097,7 +2082,7 @@ async def _get_hint_inner(request: HintRequest):
                 words_revealed.append(hint[key][0])
     hint_ai = ai_provider.get_last_call_info()
     ms = int((time.time() - start_time) * 1000)
-    log_event('hint.request', request.user_id,
+    log_event('hint.request', user_id,
               sentence=request.sentence,
               words_revealed=words_revealed,
               ms=ms,
@@ -2118,12 +2103,12 @@ async def _get_hint_inner(request: HintRequest):
 
 
 @app.post("/api/deep-analysis", response_model=DeepAnalysisResponse)
-async def deep_analysis(request: DeepAnalysisRequest):
+async def deep_analysis(request: DeepAnalysisRequest, user_id: str = Depends(get_current_user)):
     """Get a deep grammar and vocabulary analysis of a sentence."""
     try:
         start_time = time.time()
-        lang_info = get_user_language_info(request.user_id)
-        history = get_history(request.user_id)
+        lang_info = get_user_language_info(user_id)
+        history = get_history(user_id)
 
         provider = story_provider if request.model == 'pro' else ai_provider
         result = provider.deep_analysis(
@@ -2134,7 +2119,7 @@ async def deep_analysis(request: DeepAnalysisRequest):
 
         ai_info = provider.get_last_call_info()
         ms = int((time.time() - start_time) * 1000)
-        log_event('deep_analysis.request', request.user_id,
+        log_event('deep_analysis.request', user_id,
                   sentence=request.sentence,
                   direction=history.direction,
                   ms=ms,
@@ -2157,7 +2142,7 @@ async def deep_analysis(request: DeepAnalysisRequest):
     except Exception as e:
         logger.error(f"Error in deep_analysis: {type(e).__name__}: {e}")
         logger.error(traceback.format_exc())
-        log_event('error.server', request.user_id,
+        log_event('error.server', user_id,
                   endpoint='/api/deep-analysis',
                   error_type=type(e).__name__,
                   error_message=str(e),
@@ -2166,16 +2151,16 @@ async def deep_analysis(request: DeepAnalysisRequest):
 
 
 @app.post("/api/verb-hint", response_model=VerbHintResponse)
-async def get_verb_hint(request: VerbHintRequest):
+async def get_verb_hint(request: VerbHintRequest, user_id: str = Depends(get_current_user)):
     """Get conjugation rules hint for a verb challenge."""
     try:
-        return await _get_verb_hint_inner(request)
+        return await _get_verb_hint_inner(request, user_id)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in get_verb_hint: {type(e).__name__}: {e}")
         logger.error(traceback.format_exc())
-        log_event('error.server', request.user_id,
+        log_event('error.server', user_id,
                   endpoint='/api/verb-hint',
                   error_type=type(e).__name__,
                   error_message=str(e),
@@ -2183,11 +2168,11 @@ async def get_verb_hint(request: VerbHintRequest):
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
-async def _get_verb_hint_inner(request: VerbHintRequest):
+async def _get_verb_hint_inner(request: VerbHintRequest, user_id: str):
     start_time = time.time()
-    history = get_history(request.user_id)
+    history = get_history(user_id)
     lang_code = history.language
-    lang_info = get_user_language_info(request.user_id)
+    lang_info = get_user_language_info(user_id)
 
     # Extract conjugated form from "VERB:conjugated_form"
     sentence = request.sentence
@@ -2218,7 +2203,7 @@ async def _get_verb_hint_inner(request: VerbHintRequest):
 
     ms = int((time.time() - start_time) * 1000)
     hint_ai = ai_provider.get_last_call_info()
-    log_event('verb_hint.request', request.user_id,
+    log_event('verb_hint.request', user_id,
               conjugated_form=conjugated_form,
               tense=tense,
               base_verb=base_verb,
@@ -2233,7 +2218,7 @@ async def _get_verb_hint_inner(request: VerbHintRequest):
 
 
 @app.post("/api/downgrade")
-async def downgrade_level(user_id: str = "default"):
+async def downgrade_level(user_id: str = Depends(get_current_user)):
     """Voluntarily go back to the previous difficulty level, resetting score progress."""
     history = get_history(user_id)
     old_level = history.difficulty
@@ -2252,7 +2237,7 @@ async def downgrade_level(user_id: str = "default"):
 
 
 @app.post("/api/reset-story")
-async def reset_story(user_id: str = "default"):
+async def reset_story(user_id: str = Depends(get_current_user)):
     """Clear the current story so a new one will be generated."""
     history = get_history(user_id)
     history.reset_story()
@@ -2264,7 +2249,7 @@ async def reset_story(user_id: str = "default"):
 
 
 @app.post("/api/switch-direction")
-async def switch_direction(user_id: str = "default"):
+async def switch_direction(user_id: str = Depends(get_current_user)):
     """Switch between normal (ES→EN) and reverse (EN→ES) translation direction."""
     history = get_history(user_id)
     old_direction = history.direction
@@ -2286,7 +2271,7 @@ async def switch_direction(user_id: str = "default"):
 
 
 @app.get("/api/learning-words")
-async def get_learning_words(user_id: str = "default"):
+async def get_learning_words(user_id: str = Depends(get_current_user)):
     """Get words that are still being learned (not yet mastered)."""
     history = get_history(user_id)
     words = history.get_learning_words()
@@ -2298,7 +2283,7 @@ async def get_learning_words(user_id: str = "default"):
 
 
 @app.get("/api/mastered-words")
-async def get_mastered_words(user_id: str = "default"):
+async def get_mastered_words(user_id: str = Depends(get_current_user)):
     """Get mastered words (>=80% success rate and at least 2 correct)."""
     history = get_history(user_id)
     words = history.get_mastered_words()

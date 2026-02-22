@@ -49,11 +49,6 @@ function deleteCookie(name) {
 const elements = {
     // Start screen
     startScreen: document.getElementById('start-screen'),
-    startForm: document.getElementById('start-form'),
-    usernameInput: document.getElementById('username-input'),
-    pinInput: document.getElementById('pin-input'),
-    usernameError: document.getElementById('username-error'),
-    startBtn: document.getElementById('start-btn'),
 
     // Game screen
     gameScreen: document.getElementById('game-screen'),
@@ -140,7 +135,6 @@ const elements = {
     learningBtn: document.getElementById('learning-btn'),
     switchDirectionBtn: document.getElementById('switch-direction-btn'),
     switchLanguageBtn: document.getElementById('switch-language-btn'),
-    languageSelect: document.getElementById('language-select'),
     languageModal: document.getElementById('language-modal'),
     languageOptions: document.getElementById('language-options'),
     downgradeBtn: document.getElementById('downgrade-btn'),
@@ -223,6 +217,10 @@ async function api(endpoint, options = {}) {
         throw new Error(msg);
     }
     if (!response.ok) {
+        if (response.status === 401) {
+            window.location.href = '/login';
+            throw new Error('Session expired');
+        }
         let detail = `API error: ${response.status}`;
         try {
             const data = await response.json();
@@ -243,32 +241,13 @@ async function api(endpoint, options = {}) {
     return response.json();
 }
 
-// User management APIs
-async function checkUserExists(userId) {
-    return api(`/api/users/${encodeURIComponent(userId)}/exists`);
-}
-
-async function createUser(userId, pin, language = 'es') {
-    return api(`/api/users/${encodeURIComponent(userId)}`, {
-        method: 'POST',
-        body: JSON.stringify({ pin, language })
-    });
-}
-
-async function loginUser(userId, pin) {
-    return api(`/api/users/${encodeURIComponent(userId)}/login`, {
-        method: 'POST',
-        body: JSON.stringify({ pin })
-    });
-}
-
-// Game APIs (all include user_id)
+// Game APIs
 async function getStatus() {
-    return api(`/api/status?user_id=${encodeURIComponent(currentUser)}`);
+    return api('/api/status');
 }
 
 async function getNextSentence() {
-    return api(`/api/next?user_id=${encodeURIComponent(currentUser)}`);
+    return api('/api/next');
 }
 
 async function submitTranslation(sentence, translation, selectedTense = null, translations = []) {
@@ -277,7 +256,6 @@ async function submitTranslation(sentence, translation, selectedTense = null, tr
         body: JSON.stringify({
             sentence,
             translation,
-            user_id: currentUser,
             hint_used: hintUsed,
             hint_words: hintWords,
             selected_tense: selectedTense,
@@ -289,23 +267,23 @@ async function submitTranslation(sentence, translation, selectedTense = null, tr
 async function getHint(sentence) {
     return api('/api/hint', {
         method: 'POST',
-        body: JSON.stringify({ sentence, user_id: currentUser, partial_translation: elements.translationInput.value.trim() })
+        body: JSON.stringify({ sentence, partial_translation: elements.translationInput.value.trim() })
     });
 }
 
 async function getVerbHint(sentence) {
     return api('/api/verb-hint', {
         method: 'POST',
-        body: JSON.stringify({ sentence, user_id: currentUser })
+        body: JSON.stringify({ sentence })
     });
 }
 
 async function getMasteredWords() {
-    return api(`/api/mastered-words?user_id=${encodeURIComponent(currentUser)}`);
+    return api('/api/mastered-words');
 }
 
 async function getLearningWords() {
-    return api(`/api/learning-words?user_id=${encodeURIComponent(currentUser)}`);
+    return api('/api/learning-words');
 }
 
 async function getLanguages() {
@@ -313,7 +291,7 @@ async function getLanguages() {
 }
 
 async function switchLanguage(languageCode) {
-    return api(`/api/switch-language?user_id=${encodeURIComponent(currentUser)}&language=${encodeURIComponent(languageCode)}`, {
+    return api(`/api/switch-language?language=${encodeURIComponent(languageCode)}`, {
         method: 'POST'
     });
 }
@@ -325,7 +303,7 @@ async function getApiStats() {
 async function getDeepAnalysis(sentence, model = 'flash') {
     return api('/api/deep-analysis', {
         method: 'POST',
-        body: JSON.stringify({ sentence, user_id: currentUser, model })
+        body: JSON.stringify({ sentence, model })
     });
 }
 
@@ -1252,31 +1230,6 @@ async function handleHint() {
 function showStartScreen() {
     elements.startScreen.classList.remove('hidden');
     elements.gameScreen.classList.add('hidden');
-    elements.usernameInput.value = '';
-    elements.pinInput.value = '';
-    elements.usernameError.classList.add('hidden');
-    elements.usernameInput.focus();
-    // Populate language selector for new users
-    populateLoginLanguageSelect();
-}
-
-async function populateLoginLanguageSelect() {
-    try {
-        const data = await getLanguages();
-        availableLanguages = data.languages || [];
-        if (elements.languageSelect && availableLanguages.length > 0) {
-            elements.languageSelect.innerHTML = '';
-            for (const lang of availableLanguages) {
-                const option = document.createElement('option');
-                option.value = lang.code;
-                option.textContent = lang.english_name;
-                if (lang.code === 'es') option.selected = true;
-                elements.languageSelect.appendChild(option);
-            }
-        }
-    } catch (e) {
-        console.error('Failed to load languages for selector:', e);
-    }
 }
 
 function showGameScreen() {
@@ -1286,78 +1239,17 @@ function showGameScreen() {
     loadNextSentence();
 }
 
-async function handleStartForm(e) {
-    e.preventDefault();
-
-    const username = elements.usernameInput.value.trim().toLowerCase();
-    const pin = elements.pinInput.value.trim();
-
-    if (!username) {
-        showUsernameError('Please enter a name');
-        return;
-    }
-
-    // Validate username (alphanumeric and spaces only)
-    if (!/^[a-zA-Z0-9 ]+$/.test(username)) {
-        showUsernameError('Name can only contain letters, numbers, and spaces');
-        return;
-    }
-
-    // Validate PIN (exactly 4 digits)
-    if (!pin || pin.length !== 4 || !/^\d{4}$/.test(pin)) {
-        showUsernameError('PIN must be exactly 4 digits');
-        return;
-    }
-
-    elements.startBtn.disabled = true;
-    elements.startBtn.textContent = 'Starting...';
-
-    try {
-        // Check if user exists
-        const { exists } = await checkUserExists(username);
-
-        if (exists) {
-            // User exists - try to login with PIN
-            const result = await loginUser(username, pin);
-            if (result.success) {
-                currentUser = username;
-                setCookie('tongue_user', username);
-                showGameScreen();
-            } else {
-                showUsernameError(result.error || 'Invalid PIN');
-            }
-        } else {
-            // New user - create them with selected language
-            const selectedLanguage = elements.languageSelect ? elements.languageSelect.value : 'es';
-            const result = await createUser(username, pin, selectedLanguage);
-            if (result.success) {
-                currentUser = username;
-                setCookie('tongue_user', username);
-                showGameScreen();
-            } else {
-                showUsernameError(result.error || 'Failed to create user');
-            }
-        }
-    } catch (error) {
-        console.error('Error starting game:', error);
-        showUsernameError('Failed to start. Please try again.');
-    } finally {
-        elements.startBtn.disabled = false;
-        elements.startBtn.textContent = 'Start Practice';
-    }
+async function startGame() {
+    showGameScreen();
 }
 
-function showUsernameError(message) {
-    elements.usernameError.textContent = message;
-    elements.usernameError.classList.remove('hidden');
-}
 
 async function handleDowngrade() {
     if (!confirm('Go back to the previous level? This will reset your current score progress.')) return;
     try {
-        const data = await api(`/api/downgrade?user_id=${currentUser}`, { method: 'POST' });
+        const data = await api('/api/downgrade', { method: 'POST' });
         if (data.success) {
-            const status = await api(`/api/status?user_id=${currentUser}`);
+            const status = await getStatus();
             updateStatusBar(status);
             loadNextSentence();
         } else {
@@ -1378,7 +1270,7 @@ async function handleResetStory() {
     elements.validationResult.classList.add('hidden');
 
     try {
-        const data = await api(`/api/reset-story?user_id=${currentUser}`, { method: 'POST' });
+        const data = await api('/api/reset-story', { method: 'POST' });
         if (data.success) {
             loadNextSentence();
         } else {
@@ -1391,7 +1283,7 @@ async function handleResetStory() {
 
 async function handleSwitchDirection() {
     try {
-        const data = await api(`/api/switch-direction?user_id=${encodeURIComponent(currentUser)}`, { method: 'POST' });
+        const data = await api('/api/switch-direction', { method: 'POST' });
         if (data.success) {
             currentDirection = data.direction;
             const status = await getStatus();
@@ -1449,10 +1341,8 @@ async function handleSwitchLanguage() {
 }
 
 function handleNewGame() {
-    if (confirm('Start a new game? This will take you back to the name selection screen.')) {
-        deleteCookie('tongue_user');
-        currentUser = null;
-        showStartScreen();
+    if (confirm('Start a new game? This will reload your progress from the server.')) {
+        loadNextSentence();
     }
 }
 
@@ -1495,6 +1385,13 @@ function renderDeepAnalysis(data) {
             if (w.other_meanings) {
                 html += `. <span class="da-alt">Also: ${w.other_meanings}</span>`;
             }
+            if (w.latin_origin) {
+                html += `. <span class="da-etymology">Latin: <em>${w.latin_origin}</em>`;
+                if (w.english_cognate) {
+                    html += ` → English: <em>${w.english_cognate}</em>`;
+                }
+                html += '</span>';
+            }
             html += '</div>';
         }
         html += '</div>';
@@ -1523,7 +1420,9 @@ function renderDeepAnalysis(data) {
 }
 
 async function handleAnalysis(model) {
-    const sentence = elements.prevSentence.textContent;
+    const sentence = currentDirection === 'reverse'
+        ? elements.prevCorrect.textContent
+        : elements.prevSentence.textContent;
     if (!sentence) return;
 
     const isDeep = model === 'pro';
@@ -1559,7 +1458,6 @@ async function handleAnalysis(model) {
 }
 
 // Event Listeners
-elements.startForm.addEventListener('submit', handleStartForm);
 elements.translationForm.addEventListener('submit', handleSubmit);
 elements.hintBtn.addEventListener('click', handleHint);
 elements.menuBtn.addEventListener('click', toggleMenu);
@@ -1635,24 +1533,18 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Initialize - check for existing user cookie
-function init() {
-    const savedUser = (getCookie('tongue_user') || '').toLowerCase() || null;
-    if (savedUser) {
-        // Verify user still exists
-        checkUserExists(savedUser).then(({ exists }) => {
-            if (exists) {
-                currentUser = savedUser;
-                showGameScreen();
-            } else {
-                // User was deleted, show start screen
-                deleteCookie('tongue_user');
-                showStartScreen();
-            }
-        }).catch(() => {
+// Initialize - check session via /api/me
+async function init() {
+    try {
+        const res = await fetch('/api/me');
+        if (res.status === 401) {
             showStartScreen();
-        });
-    } else {
+            return;
+        }
+        const data = await res.json();
+        currentUser = data.user_id;
+        showGameScreen();
+    } catch (e) {
         showStartScreen();
     }
 }
