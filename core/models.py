@@ -703,12 +703,12 @@ class History:
         new_level = self.difficulty
         change_type = None
 
-        if self.check_advancement():
+        if score >= ADVANCE_SCORE_THRESHOLD and self.check_advancement():
             self.advance_level()
             level_changed = True
             new_level = self.difficulty
             change_type = "advanced"
-        elif self.check_demotion():
+        elif score < DEMOTE_SCORE_THRESHOLD and self.check_demotion():
             self.demote_level()
             level_changed = True
             new_level = self.difficulty

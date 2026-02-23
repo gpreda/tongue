@@ -372,9 +372,9 @@ def log_event(event: str, user_id: str, **data) -> int | None:
     """Log an event to the database. Returns the event ID."""
     if storage and hasattr(storage, 'log_event'):
         history = user_histories.get(user_id)
-        difficulty = history.difficulty if history else None
         session_id = get_session_id(user_id)
-        # Extract AI-related fields so they go into dedicated columns
+        # Extract dedicated column fields from data to avoid duplicate kwarg errors
+        difficulty = data.pop('difficulty', history.difficulty if history else None)
         ai_used = data.pop('ai_used', False)
         model_name = data.pop('model_name', None)
         model_tokens = data.pop('model_tokens', None)
