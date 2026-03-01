@@ -423,9 +423,11 @@ class GeminiProvider(AIProvider):
                   left untranslated, or omitted entirely.
                   IMPORTANT: Check the actual {target_language} word the student used, not just sentence meaning.
 
-            'correct_translation': An ideal {target_language} translation of the {source_language} sentence,
-              generated independently from the student's answer — do NOT anchor to or copy from the student's wording.
+            'correct_translation': An ideal {target_language} translation of the {source_language} sentence.
+              CRITICAL: Generate this translation INDEPENDENTLY — pretend you have NOT seen the student's answer.
               Translate directly from the source sentence as an expert translator would.
+              If your evaluation found errors in the student's answer, the correct_translation MUST differ
+              from the student's wording on those points. Do NOT reproduce the student's mistakes here.
 
             'score': Integer 1-100. Base it on:
               - What percentage of words were correctly translated
