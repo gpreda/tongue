@@ -723,6 +723,8 @@ header h1 {
     color: #fff;
     margin-bottom: 15px;
     transition: border-color 0.3s;
+    resize: none;
+    font-family: inherit;
 }
 
 #translation-input:focus {

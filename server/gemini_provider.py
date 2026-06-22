@@ -30,7 +30,7 @@ SEASONS = ["spring", "summer", "autumn", "winter"]
 class GeminiProvider(AIProvider):
     """Gemini AI provider implementation."""
 
-    def __init__(self, api_key: str, model_name: str = 'gemini-2.0-flash', storage=None):
+    def __init__(self, api_key: str, model_name: str = 'gemini-3.5-flash', storage=None):
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel(model_name)
         self.chat = self.model.start_chat(history=[])
@@ -344,9 +344,13 @@ class GeminiProvider(AIProvider):
 
             STEP 1 - WORD-BY-WORD MAPPING (do this carefully):
             For EACH content word in the {source_language} sentence:
-            a) List the correct {target_language} translation(s)
-            b) Find what {target_language} word the student actually used for it
+            a) List the correct {target_language} dictionary translation(s) — this must be the REAL meaning of the word,
+               determined independently from your knowledge of {source_language}, NOT by aligning positions with the student's answer
+            b) Find what {target_language} word the student actually used for it (by MEANING, not by position)
             c) Determine if they match
+
+            CRITICAL: Do NOT align words by position (word #1 → student's word #1). The student's translation
+            may have different word order, missing words, or extra words. Match by MEANING only.
 
             Example analysis:
             - "escuela" → correct: "school" → student used: "stairs" → MISMATCH (mistranslated)
@@ -367,6 +371,10 @@ class GeminiProvider(AIProvider):
                - "lejos de" = "far from" (NOT "far of")
                - "antes de" = "before" (NOT "before of")
                - "después de" = "after" (NOT "after of")
+               - POSSESSIVE "de": "[article] [noun] de [owner]" = "[owner]'s [noun]"
+                 (e.g., "La gata de Ana" = "Ana's cat" — the article "La", preposition "de", and
+                 proper noun "Ana" are all absorbed into the possessive "'s" construction.
+                 Mark ALL component words as correct.)
                When a student correctly translates an idiom, mark all component words as correct.
             3. A word is INCORRECTLY translated if:
                - Left in {source_language} (not translated at all, e.g., "casa" instead of "house")
@@ -414,7 +422,11 @@ class GeminiProvider(AIProvider):
 
             'vocabulary_breakdown': A list of lists, one for each meaningful word/phrase:
               [0] The {source_language} word/phrase from the original sentence (MUST be in {source_language})
-              [1] The correct {target_language} translation(s) for this word in context (MUST be in {target_language})
+              [1] The correct {target_language} DICTIONARY translation(s) for this word in context (MUST be in {target_language})
+              IMPORTANT: [1] must be the REAL dictionary meaning of the word, NOT a word copied from the student's answer.
+              For example, if the {source_language} word is "ido" (past participle of "ir"), the translation MUST be
+              "gone" — even if the student wrote something completely different like a number or random text.
+              Each word's translation should make sense as a standalone dictionary entry for that word.
               IMPORTANT: The order is ALWAYS [{source_language} word, {target_language} translation].
               For example, if source is English and target is Spanish: ["swim", "nadan"] NOT ["nadan", "swim"].
               [2] Part of speech (noun, verb, adjective, etc.)
@@ -438,6 +450,9 @@ class GeminiProvider(AIProvider):
             'evaluation': Brief explanation. Be ACCURATE:
               - Do not claim a word was "added" if it's a valid translation or part of an idiom
               - Only mention actual errors, not valid idiomatic translations
+              - SELF-CHECK: Re-read your evaluation before responding. If it claims a word was
+                missing, untranslated, or incorrect, verify that the student's translation truly
+                lacks it. Do not cite correctly translated parts as errors.
 
             Return ONLY the dictionary, no other text, no markdown formatting.
         """

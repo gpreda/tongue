@@ -35,9 +35,9 @@ def main():
     print("Generating stories at difficulty level 3...\n")
     print("=" * 80)
 
-    # Model 1: Default (gemini-2.0-flash)
-    print("\n[MODEL 1: gemini-2.0-flash]\n")
-    provider1 = GeminiProvider(api_key, model_name='gemini-2.0-flash')
+    # Model 1: Default (gemini-3.5-flash)
+    print("\n[MODEL 1: gemini-3.5-flash]\n")
+    provider1 = GeminiProvider(api_key, model_name='gemini-3.5-flash')
     story1, ms1 = provider1.generate_story(correct_words, difficulty)
     print(story1)
     print(f"\n⏱ Time: {ms1}ms")
@@ -46,9 +46,9 @@ def main():
 
     print("\n" + "-" * 80)
 
-    # Model 2: gemini-2.5-pro
-    print("\n[MODEL 2: gemini-2.5-pro]\n")
-    provider2 = GeminiProvider(api_key, model_name='gemini-2.5-pro')
+    # Model 2: gemini-3.1-pro-preview
+    print("\n[MODEL 2: gemini-3.1-pro-preview]\n")
+    provider2 = GeminiProvider(api_key, model_name='gemini-3.1-pro-preview')
     story2, ms2 = provider2.generate_story(correct_words, difficulty)
     print(story2)
     print(f"\n⏱ Time: {ms2}ms")
@@ -57,7 +57,7 @@ def main():
 
     print("\n" + "=" * 80)
     print("\n[COMPARISON SUMMARY]\n")
-    print(f"{'Metric':<20} {'gemini-2.0-flash':<25} {'gemini-2.5-pro':<25}")
+    print(f"{'Metric':<20} {'gemini-3.5-flash':<25} {'gemini-3.1-pro-preview':<25}")
     print("-" * 70)
     print(f"{'Time (ms)':<20} {ms1:<25} {ms2:<25}")
     print(f"{'Total tokens':<20} {stats1['story']['total_tokens']:<25} {stats2['story']['total_tokens']:<25}")

@@ -619,10 +619,10 @@ async def startup():
         )
 
     # Fast model for validation, hints, word/verb analysis
-    ai_provider = GeminiProvider(api_key, model_name='gemini-2.0-flash', storage=storage)
+    ai_provider = GeminiProvider(api_key, model_name='gemini-3.5-flash', storage=storage)
     # Pro model for higher quality story generation
-    story_provider = GeminiProvider(api_key, model_name='gemini-2.5-pro', storage=storage)
-    print("AI providers initialized: gemini-2.0-flash (validation), gemini-2.5-pro (stories)")
+    story_provider = GeminiProvider(api_key, model_name='gemini-3.1-pro-preview', storage=storage)
+    print("AI providers initialized: gemini-3.5-flash (validation), gemini-3.1-pro-preview (stories)")
 
     # Initialize vocabulary storage and seed DB for all active languages
     from core.vocabulary import init_storage as vocab_init_storage, get_seed_data

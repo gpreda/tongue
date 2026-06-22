@@ -1458,6 +1458,12 @@ async function handleAnalysis(model) {
 }
 
 // Event Listeners
+elements.translationInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        elements.translationForm.requestSubmit();
+    }
+});
 elements.translationForm.addEventListener('submit', handleSubmit);
 elements.hintBtn.addEventListener('click', handleHint);
 elements.menuBtn.addEventListener('click', toggleMenu);

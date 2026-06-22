@@ -5,7 +5,7 @@ import os
 import re
 
 DEBUG = False
-GEMINI_MODEL = 'gemini-2.0-flash'
+GEMINI_MODEL = 'gemini-3.5-flash'
 LANGUAGE = 'Spanish'
 MIN_DIFFICULTY = 1
 MAX_DIFFICULTY = 10
